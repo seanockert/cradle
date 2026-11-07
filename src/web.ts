@@ -34,18 +34,42 @@ const auth: MiddlewareHandler<App> = async (c, next) => {
   return c.redirect(`/t/login?next=${encodeURIComponent(c.req.path)}`)
 }
 
-const CSS = `body{font:15px/1.55 system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;color:#222}
-a{color:#0b62d6;text-decoration:none}a:hover{text-decoration:underline}
-h2{margin-top:2rem;font-size:1.1rem}ul{padding-left:1.2rem}li{margin:.2rem 0}
-.s{display:inline-block;min-width:4.5rem;font-size:.8rem;color:#666}.id{font-family:ui-monospace,monospace;font-size:.85rem}.l{font-size:.8rem;color:#888}.ctx{margin:-.5rem 0 .5rem;color:#666;font-size:.9rem}
-table{border-collapse:collapse;font-size:.9rem;margin:1rem 0}td{padding:.15rem 1rem .15rem 0;vertical-align:top}td:first-child{color:#666}
-pre,code{font-family:ui-monospace,monospace;font-size:.85rem}pre{background:#f4f4f4;padding:.7rem;overflow-x:auto}
-.body{border-top:1px solid #ddd;margin-top:1rem}.note{font-size:.9rem}.note span{color:#666;margin-right:.5rem}
-@media(prefers-color-scheme:dark){body{background:#151515;color:#ddd}a{color:#6aa8ff}pre{background:#222}.body{border-color:#333}}`
+// Layout classes (stack, inline) from https://seanockert.com/css-layouts
+const CSS = `:root{--fg:#1c1c1c;--muted:#6e6e6e;--line:#e8e8e8;--soft:#f4f4f3;--bg:#fff;--link:#0b62d6;color-scheme:light dark}
+@media(prefers-color-scheme:dark){:root{--fg:#e4e4e4;--muted:#949494;--line:#2c2c2c;--soft:#222;--bg:#141414;--link:#6aa8ff}}
+*{box-sizing:border-box}
+body{font:15px/1.6 system-ui,sans-serif;max-width:720px;margin:0 auto;padding:1.5rem 1.25rem 4rem;color:var(--fg);background:var(--bg)}
+[class^=inline],[class*=' inline'],[class^=stack],[class*=' stack']{--gap:.75rem;display:flex;gap:var(--gap)}
+[class^=inline],[class*=' inline']{align-items:center;flex-wrap:wrap}
+[class^=stack],[class*=' stack']{flex-direction:column}
+.inline-half,.stack-half{--gap:.375rem}.stack-2x{--gap:1.5rem}.inline-between{justify-content:space-between}
+ul[class]{list-style:none;margin:0;padding:0}
+a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
+nav{padding-bottom:1rem;border-bottom:1px solid var(--line);font-size:.9rem}nav .brand{color:var(--fg);font-weight:600}
+h1{font-size:1.6rem;line-height:1.25;margin:0}
+h2{font-size:1.05rem;margin:2rem 0 .5rem}h2 a{color:inherit}
+h3{font-size:.95rem;margin:1.5rem 0 .4rem}
+.muted,.l{color:var(--muted)}.l{font-size:.8rem}.ctx{color:var(--muted);font-size:.9rem;margin:0 0 .5rem}
+.id{font-family:ui-monospace,monospace;font-size:.8rem;color:var(--muted)}
+.pill{display:inline-block;min-width:4.5rem;text-align:center;font-size:.75rem;padding:.05rem .5rem;border-radius:99px;color:var(--muted);background:color-mix(in srgb,currentColor 12%,transparent)}
+.st-doing{color:#2563eb}.st-done{color:#16a34a}.st-cancelled{text-decoration:line-through}
+.rows li{padding:.4rem 0;border-bottom:1px solid var(--line)}.rows li:last-child{border:0}
+.meta{display:grid;grid-template-columns:max-content 1fr;gap:.3rem 1.5rem;margin:0;font-size:.9rem}.meta dt{color:var(--muted)}.meta dd{margin:0}
+.body{border-top:1px solid var(--line)}.body>:first-child{margin-top:1.5rem}
+li:has(>input[type=checkbox]){list-style:none;margin-left:-1.3rem}li>input[type=checkbox]{margin:0 .5rem 0 0;vertical-align:-1px}
+pre,code{font-family:ui-monospace,monospace;font-size:.85em}
+:not(pre)>code{background:var(--soft);padding:.1rem .3rem;border-radius:4px}
+pre{background:var(--soft);padding:.75rem 1rem;border-radius:6px;overflow-x:auto}
+section>h2{margin:0}.note{font-size:.9rem}.note time{color:var(--muted);font-family:ui-monospace,monospace;font-size:.8rem;margin-right:.75rem}
+input[type=password]{width:100%;padding:.5rem .6rem;font:inherit;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:inherit}
+button{font:inherit;padding:.4rem 1rem;border:0;border-radius:6px;background:var(--fg);color:var(--bg);cursor:pointer}`
+
+const nav = (links: unknown = '') =>
+  html`<nav class="inline-between"><a class="brand" href="/t">cradle</a><span class="inline">${links}</span></nav>`
 
 const page = (title: string, body: unknown) =>
   html`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title}</title><style>${raw(CSS)}</style></head><body>${body}</body></html>`
+<title>${title}</title><style>${raw(CSS)}</style></head><body class="stack-2x">${body}</body></html>`
 
 type Row = Record<string, any>
 
@@ -54,9 +78,11 @@ const idLink = (id: string) => html`<a class="id" href="/t/${id}">${id}</a>`
 const labelLinks = (labels?: string[]) => labels?.map((l) => html` <a class="l" href="/t?label=${encodeURIComponent(l)}">#${l}</a>`) ?? ''
 
 const item = (t: Row) =>
-  html`<li><span class="s">${t.status}</span> ${idLink(t.id)} ${t.title}${labelLinks(t.labels)}${
-    t.assignee ? html` <small>@${t.assignee}</small>` : ''
+  html`<li class="inline-half"><span class="pill st-${t.status}">${t.status}</span> ${idLink(t.id)} ${t.title}${labelLinks(t.labels)}${
+    t.assignee ? html` <small class="muted">@${t.assignee}</small>` : ''
   }</li>`
+
+const list = (rows: Row[]) => html`<ul class="rows">${rows.map(item)}</ul>`
 
 export const web = new Hono<App>()
 
@@ -64,7 +90,7 @@ web.use(auth)
 
 web.onError((err, c) => {
   const { status, error } = core.errorInfo(err)
-  return c.html(page('cradle', html`<a href="/t">← all</a><p>${error}</p>`), status)
+  return c.html(page('cradle', html`${nav()}<p>${error}</p>`), status)
 })
 
 // Redirect to /t paths only
@@ -73,10 +99,10 @@ const safeNext = (n?: string) => (n && /^\/t(\/[\w.-]+)*$/.test(n) ? n : '/t')
 const loginPage = (next: string, error = '') =>
   page(
     'cradle login',
-    html`<h1>cradle</h1>${error ? html`<p>${error}</p>` : ''}
-<form method="post" action="/t/login"><input type="hidden" name="next" value="${next}">
-<input type="password" name="token" placeholder="token" autofocus required style="width:100%;padding:.5rem;font:inherit">
-<p><button>Log in</button></p></form>`,
+    html`${nav()}<form class="stack" method="post" action="/t/login"><input type="hidden" name="next" value="${next}">
+${error ? html`<p class="muted" style="margin:0">${error}</p>` : ''}
+<input type="password" name="token" placeholder="token" autofocus required>
+<div><button>Log in</button></div></form>`,
   )
 
 web.get('/login', (c) => c.html(loginPage(safeNext(c.req.query('next')))))
@@ -107,15 +133,13 @@ web.get('/', async (c) => {
   const groups = projects.map((p: Row) => {
     const rows = tickets.filter((t: Row) => t.id.startsWith(`${p.key}-`))
     return rows.length
-      ? html`<h2><a href="/t/p/${p.key}">${p.key} · ${p.name}</a></h2>${p.description ? html`<p class="ctx">${summary(p.description)}</p>` : ''}<ul>${rows.map(item)}</ul>`
+      ? html`<section class="stack-half"><h2><a href="/t/p/${p.key}">${p.key} · ${p.name}</a></h2>${p.description ? html`<p class="ctx">${summary(p.description)}</p>` : ''}${list(rows)}</section>`
       : ''
   })
   return c.html(
     page(
       'cradle',
-      html`<h1>cradle${label ? html` · #${label}` : ''}</h1><a href="/t?${qs(!all)}">${all ? 'hide' : 'show'} done</a>${
-        label ? html` · <a href="/t${all ? '?all=1' : ''}">all labels</a>` : ''
-      }${
+      html`${nav(html`${label ? html`<span class="muted">#${label}</span><a href="/t${all ? '?all=1' : ''}">all labels</a>` : ''}<a href="/t?${qs(!all)}">${all ? 'hide' : 'show'} done</a>`)}${
         tickets.length ? groups : html`<p>No tickets.</p>`
       }`,
     ),
@@ -130,10 +154,10 @@ web.get('/p/:key', async (c) => {
   return c.html(
     page(
       `${p.key} ${p.name}`,
-      html`<a href="/t">← all</a>
-<h1>${p.key} · ${p.name}</h1>${p.repos?.length ? html`<p class="ctx">repos: ${p.repos.join(', ')}</p>` : ''}
-${p.description ? html`<div class="body">${raw(await md.parse(p.description))}</div>` : html`<p>No context yet.</p>`}
-<h2>Open tickets</h2>${tickets.length ? html`<ul>${tickets.map(item)}</ul>` : html`<p>None.</p>`}`,
+      html`${nav()}
+<header class="stack-half"><span class="id">${p.key}</span><h1>${p.name}</h1>${p.repos?.length ? html`<p class="ctx">repos: ${p.repos.join(', ')}</p>` : ''}</header>
+${p.description ? html`<div class="body">${raw(await md.parse(p.description))}</div>` : html`<p class="muted">No context yet.</p>`}
+<section class="stack-half"><h2>Open tickets</h2>${tickets.length ? list(tickets) : html`<p class="muted">None.</p>`}</section>`,
     ),
   )
 })
@@ -147,7 +171,7 @@ web.get('/:file{[A-Za-z]{2,5}-\\d+\\.md}', async (c) => {
 web.get('/:id', async (c) => {
   const t: Row = await core.getTicket(c.env.DB, c.req.param('id'), { notes: true })
   const rows: [string, unknown][] = [
-    ['status', t.status],
+    ['status', html`<span class="pill st-${t.status}">${t.status}</span>`],
     ['labels', t.labels?.length && labelLinks(t.labels)],
     ['assignee', t.assignee],
     ['branch', t.branch && html`<code>${t.branch}</code>`],
@@ -159,14 +183,14 @@ web.get('/:id', async (c) => {
   return c.html(
     page(
       `${t.id} ${t.title}`,
-      html`<a href="/t">← all</a> · <a href="/t/${t.id}.md">export .md</a>
-<h1><span class="id">${t.id}</span> ${t.title}</h1>
-<table>${rows.filter(([, v]) => v).map(([k, v]) => html`<tr><td>${k}</td><td>${v}</td></tr>`)}</table>
+      html`${nav(html`<a href="/t/${t.id}.md">export .md</a>`)}
+<header class="stack-half"><span class="id">${t.id}</span><h1>${t.title}</h1></header>
+<dl class="meta">${rows.filter(([, v]) => v).map(([k, v]) => html`<dt>${k}</dt><dd>${v}</dd>`)}</dl>
 ${t.body ? html`<div class="body">${raw(await md.parse(t.body))}</div>` : ''}
-${t.children?.length ? html`<h2>Sub-tickets</h2><ul>${t.children.map(item)}</ul>` : ''}
+${t.children?.length ? html`<section class="stack-half"><h2>Sub-tickets</h2>${list(t.children)}</section>` : ''}
 ${
   t.notes?.length
-    ? html`<h2>Notes</h2>${t.notes.map((n: Row) => html`<p class="note"><span>${n.ts.slice(0, 16)}</span>${n.text}</p>`)}`
+    ? html`<section class="stack-half"><h2>Notes</h2><ul class="rows">${t.notes.map((n: Row) => html`<li class="note"><time>${n.ts.slice(0, 16)}</time>${n.text}</li>`)}</ul></section>`
     : ''
 }`,
     ),

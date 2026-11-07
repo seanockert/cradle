@@ -74,7 +74,11 @@ cradle project edit WEB -r website,website-api   # set its repos
 
 ## Web view
 
-`https://cradle.<you>.workers.dev/t` lists open tickets. `/t/p/WEB` shows a project's context. `/t/WEB-1` shows one ticket. Log in once with your token.
+`https://cradle.<you>.workers.dev/t` lists open tickets. `/t/p/WEB` shows a project's context. `/t/WEB-1` shows one ticket. Log in once with your token (30-day cookie). To copy the token:
+
+```sh
+jq -r .token ~/.config/cradle/config.json | pbcopy
+```
 
 ## Export
 
