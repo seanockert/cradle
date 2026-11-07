@@ -73,7 +73,7 @@ Rules: tool descriptions under 30 words. Lists never include body. Default limit
 Server `instructions` (sent once when the agent connects):
 
 > To work on a ticket: get it, check it against the latest main, fix stale facts (save with edits), check out its branch (create it if missing), save status doing. After opening a PR, save pr=<url>. Merging the PR sets status done if the repo has the cradle webhook; else set it yourself.
-> Labels: bug, feature, improvement, chore, and repo:<name> for the code repo.
+> When you create a ticket, add one type label (bug, feature, improvement, chore) and repo:<git repo name>.
 
 ## CLI (`cradle`) (done)
 
