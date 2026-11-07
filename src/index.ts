@@ -1,10 +1,12 @@
-import { Hono } from 'hono'
+import { Hono, type MiddlewareHandler } from 'hono'
 import { bearerAuth } from 'hono/bearer-auth'
 import { HTTPException } from 'hono/http-exception'
 import { timingSafeEqual } from 'hono/utils/buffer'
 import * as core from './core'
 import { handleGithub } from './github'
+import { mcpKey } from './secret'
 import { handleMcp } from './mcp'
+import { web } from './web'
 
 const app = new Hono<{ Bindings: Env }>()
 
@@ -63,7 +65,23 @@ api.patch('/tickets/:id', async (c) => {
 
 app.route('/api', api)
 
-app.all('/mcp', auth, (c) => handleMcp(c.req.raw, c.env.DB))
+// MCP auth: key in URL (/mcp/<key>) or bearer header (/mcp).
+// Fail with 403, not 401: a 401 makes MCP clients start an OAuth flow, which cradle does not have.
+const mcpAuth: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
+  const want = c.env.TOKEN
+  const key = c.req.param('key')
+  const bearer = c.req.header('authorization')?.match(/^Bearer (.+)$/i)?.[1]
+  const ok = !!want && (key ? await timingSafeEqual(key, await mcpKey(want)) : !!bearer && (await timingSafeEqual(bearer, want)))
+  if (ok) return next()
+  const message = 'cradle: bad or missing key. Run `cradle mcp` to get the URL.'
+  return c.json({ jsonrpc: '2.0', id: null, error: { code: -32001, message } }, 403)
+}
+
+const mcp = (c: { req: { raw: Request }; env: Env }) => handleMcp(c.req.raw, c.env.DB)
+app.all('/mcp', mcpAuth, mcp)
+app.all('/mcp/:key', mcpAuth, mcp)
+
+app.route('/t', web)
 
 // Signed by GitHub, not the bearer token
 app.post('/gh', async (c) => {

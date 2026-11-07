@@ -24,11 +24,23 @@ cradle config https://cradle.<you>.workers.dev <token>
 
 ## MCP
 
-Endpoint: `https://cradle.<you>.workers.dev/mcp`, header `Authorization: Bearer <token>`.
-
 ```sh
-claude mcp add --scope user --transport http cradle https://cradle.<you>.workers.dev/mcp \
-  --header "Authorization: Bearer <token>"
+cradle mcp add    # Claude Code, all projects
+cradle mcp        # URL + JSON config for other agents
 ```
 
-Other agents: add an HTTP (Streamable HTTP) MCP server with the same URL and header.
+The URL has a key (`/mcp/<key>`), so agents need no headers and no OAuth. The key only opens MCP. `Authorization: Bearer <token>` on `/mcp` also works. Bad or missing key returns 403 with a message.
+
+## GitHub
+
+In each repo (needs `gh` logged in):
+
+```sh
+cradle gh hook            # or: cradle gh hook owner/repo
+```
+
+PR from branch `web-1-...` opened: ticket moves to `doing` and gets the PR link. Merged: `done`.
+
+## Web view
+
+`https://cradle.<you>.workers.dev/t` lists open tickets. `/t/WEB-1` shows one. Log in once with your token.

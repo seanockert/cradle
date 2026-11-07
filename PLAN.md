@@ -11,7 +11,7 @@ Headless ticket tracker for AI agents. Hono on Cloudflare Workers, D1 storage. A
 
 ## Not in v1
 
-Images and attachments (no R2), priority, sort order, custom statuses, more than one user, a full UI.
+Paid Cloudflare plans (free tier only), images and attachments (no R2), priority, sort order, custom statuses, more than one user, a full UI.
 
 ## Layout
 
@@ -22,6 +22,9 @@ src/core.ts    ticket operations + zod schemas (one source of truth)
 src/index.ts   Hono: /api (REST), /mcp, /t/:id (view), /gh (webhook)
 src/format.ts  compact text output (CLI + MCP)
 src/mcp.ts     MCP server, 4 tools
+src/github.ts  PR webhook
+src/web.ts     /t read-only HTML + login
+src/secret.ts  values derived from TOKEN
 src/cli.ts     `cradle` CLI (Bun), calls /api
 migrations/    D1 SQL
 ```
@@ -48,13 +51,13 @@ notes(id, ticket, ts, text)                      -- append-only
 ## Auth
 
 - v1: one bearer token, kept as a Worker secret. The CLI reads it from `~/.config/cradle/config`.
-- `/t/:id`: Cloudflare Access (free, no auth code).
-- `/gh`: GitHub HMAC signature (`GH_WEBHOOK_SECRET`).
+- `/t`: paste TOKEN at `/t/login` once. Sets an HttpOnly cookie (30 days, path `/t`) whose value is derived from TOKEN. Changing TOKEN logs out. No Cloudflare Access, so no Zero Trust plan.
+- `/gh`: GitHub HMAC signature. Secret derived from `TOKEN`.
 - Later: `users` table, one token per user. `assignee` is already a handle.
 
 ## MCP (done)
 
-`src/mcp.ts`. Stateless Streamable HTTP, JSON responses, new server per request, no Durable Objects. Same bearer token as REST. Tool definitions total about 2.8 KB (about 700 tokens).
+`src/mcp.ts`. Stateless Streamable HTTP, JSON responses, new server per request, no Durable Objects. Auth: key in URL (`/mcp/<key>`, derived from TOKEN, MCP only) or bearer TOKEN on `/mcp`. Fails with 403, not 401, so clients do not start OAuth. `cradle mcp add` sets up Claude Code; `cradle mcp` prints the URL + config. Tool definitions total about 2.8 KB (about 700 tokens).
 
 | Tool | Does | Returns |
 |---|---|---|
@@ -67,9 +70,7 @@ Rules: tool descriptions under 30 words. Lists never include body. Default limit
 
 Server `instructions` (sent once when the agent connects):
 
-> To work on a ticket: get it, check it against the latest main, fix stale facts (save with edits), check out its branch (create it if missing), save status doing. After opening a PR, save pr=<url>. When the work is merged, save status done.
-
-After step 4, change the last sentence: the webhook sets `done`.
+> To work on a ticket: get it, check it against the latest main, fix stale facts (save with edits), check out its branch (create it if missing), save status doing. After opening a PR, save pr=<url>. Merging the PR sets status done if the repo has the cradle webhook; else set it yourself.
 
 ## CLI (`cradle`) (done)
 
@@ -87,6 +88,8 @@ cradle start ID               # status=doing + git checkout (creates branch if n
 cradle branch ID
 cradle import FILE|- [-p ABC] [-s status] [--split]
 cradle project [new KEY "Name" [description]]
+cradle mcp [add]              # MCP URL + config, or add to Claude Code
+cradle gh hook [owner/repo]   # PR opened -> doing, merged -> done
 cradle config URL TOKEN       # writes ~/.config/cradle/config.json (or use CRADLE_URL, CRADLE_TOKEN)
 --json                        # compact JSON
 ```
@@ -94,37 +97,23 @@ cradle config URL TOKEN       # writes ~/.config/cradle/config.json (or use CRAD
 - Default project for `new` and `import`: `-p`, then `CRADLE_PROJECT`, then a `.cradle` file (contains `ABC`) in this or a parent dir.
 - Import: H1 or frontmatter `title` becomes the title, else the file name. `--split` makes each `##` section a sub-ticket under one parent.
 - Dropped for simplicity: `search` (use `ls -q`), `board`.
-- Later: `cradle gh hook owner/repo` (step 4).
 
-## GitHub webhook (`POST /gh`)
+## GitHub webhook (done)
 
-1. Check the HMAC signature.
-2. Read the `pull_request` event. Get the ticket ID from the head branch (`^([a-z]{2,5})-(\d+)`, ignore case). If the branch does not match, use the PR title.
-3. `opened` / `reopened`: set `pr`. If status is `backlog` or `todo`, set it to `doing`.
-4. `closed` + `merged: true`: set status `done`. Add the note `merged <url>`.
-5. `closed`, not merged: no change.
-6. Ignore unknown tickets. Return 200.
+`src/github.ts`, route `POST /gh`.
 
-A personal GitHub account has no webhook for all repos, so add one per repo with `cradle gh hook`.
-
-## REST (done)
-
-```
-GET   /api/projects
-POST  /api/projects        {key, name, description?}
-GET   /api/tickets          ?project&status=a,b&assignee&parent&q&all=1&limit
-GET   /api/tickets/:id      ?notes=1
-POST  /api/tickets          one item or array. With id = update, no id = create
-PATCH /api/tickets/:id      update fields, edits, blocked_by (replaces), note
-```
-
-Responses drop null and empty fields.
+- Secret: `sha256("cradle-gh:" + TOKEN)` (`src/secret.ts`). The Worker and CLI derive it, so there is no second secret. If you change `TOKEN`, run `cradle gh hook` again for each repo.
+- Ticket ID comes from the head branch (`web-1-x` or `user/web-1-x`). If the branch does not match, it comes from the PR title (`WEB-1: ...`).
+- `opened` / `reopened`: set `pr`. If status is `backlog` or `todo`, set `doing`.
+- `closed` + merged: status `done`, note `merged <url>`.
+- Everything else (closed without merge, other events, unknown ticket, no ID): 200 + reason text. The text shows in GitHub's delivery log.
+- `cradle gh hook [owner/repo]` creates the hook with `gh api`, or updates it if it exists. Without an argument it uses the current repo.
 
 ## Build order
 
 1. ~~`core` + D1 migrations + REST + token auth.~~ Done.
 2. ~~CLI.~~ Done.
 3. ~~MCP.~~ Done. Connected in Claude Code at user scope.
-4. `/gh` webhook + `cradle gh hook`.
-5. `/t/:id` read-only view behind Cloudflare Access.
+4. ~~`/gh` webhook + `cradle gh hook`.~~ Done.
+5. ~~`/t` read-only view + token login.~~ Done.
 6. Later: more users.

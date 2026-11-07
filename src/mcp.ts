@@ -5,9 +5,10 @@ import { z } from 'zod'
 import * as core from './core'
 import { lines, projectLines, ticketMd } from './format'
 
-const INSTRUCTIONS = `Cradle is a ticket tracker. IDs look like ABC-123. Each ticket has a git branch.
+const instructions = (origin: string) => `Cradle is a ticket tracker. IDs look like ABC-123. Each ticket has a git branch.
 To work on a ticket: get it, check it against the latest main, fix stale facts (save with edits), check out its branch (create it if missing), save status doing. After opening a PR, save pr=<url>. Merging the PR sets status done if the repo has the cradle webhook; else set it yourself.
-Use edits, not a full body, to change part of a body. Use note for progress and decisions.`
+Use edits, not a full body, to change part of a body. Use note for progress and decisions.
+Ticket page for PR bodies: ${origin}/t/<id>`
 
 const Status = z.enum(core.STATUSES)
 const Id = z.string().describe('e.g. ABC-123')
@@ -43,8 +44,8 @@ const run =
     }
   }
 
-function server(db: D1Database) {
-  const s = new McpServer({ name: 'cradle', version: '1.0.0' }, { instructions: INSTRUCTIONS })
+function server(db: D1Database, origin: string) {
+  const s = new McpServer({ name: 'cradle', version: '1.0.0' }, { instructions: instructions(origin) })
 
   s.registerTool(
     'list',
@@ -98,6 +99,6 @@ function server(db: D1Database) {
 
 export async function handleMcp(req: Request, db: D1Database) {
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
-  await server(db).connect(transport)
+  await server(db, new URL(req.url).origin).connect(transport)
   return transport.handleRequest(req)
 }

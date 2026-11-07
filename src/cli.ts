@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, basename } from 'node:path'
 import { EDITABLE, lines, parseMd, projectLines, ticketMd } from './format'
-import { webhookSecret } from './secret'
+import { mcpKey, webhookSecret } from './secret'
 
 const HELP = `cradle - tickets for agents
 
@@ -20,6 +20,7 @@ const HELP = `cradle - tickets for agents
   cradle import FILE|- [-p ABC] [-s status] [--split]
   cradle project [new KEY "Name" [description]]
   cradle config URL TOKEN
+  cradle mcp [add]                     print MCP URL + config. add: set up Claude Code
   cradle gh hook [owner/repo]          add webhook: PR opened -> doing, merged -> done
 
   --json   raw JSON output
@@ -249,6 +250,21 @@ const cmds: Record<string, () => Promise<void>> = {
     }
     const rows = await api('GET', '/projects')
     out(rows, () => projectLines(rows))
+  },
+
+  async mcp() {
+    const { url, token } = config()
+    const mcpUrl = `${url}/mcp/${await mcpKey(token)}`
+    if (args[1] === 'add') {
+      Bun.spawnSync(['claude', 'mcp', 'remove', 'cradle', '-s', 'user'], { stdout: 'ignore', stderr: 'ignore' })
+      const r = Bun.spawnSync(['claude', 'mcp', 'add', '--scope', 'user', '--transport', 'http', 'cradle', mcpUrl], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      if (r.exitCode !== 0) die(r.stderr.toString().trim() || 'claude mcp add failed. Is Claude Code installed?')
+      return console.log('added cradle to Claude Code (user scope). Restart sessions to load it.')
+    }
+    console.log(`URL: ${mcpUrl}\n\nConfig for other agents:\n${JSON.stringify({ mcpServers: { cradle: { type: 'http', url: mcpUrl } } }, null, 2)}\n\nClaude Code: cradle mcp add`)
   },
 
   async gh() {
