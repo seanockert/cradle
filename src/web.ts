@@ -1,11 +1,11 @@
-// Read-only HTML view: /t (open tickets) and /t/:id. Token login, cookie session.
+// Read-only HTML view: /t (open tickets), /t/:id, /t/:id.md (export). Token login, cookie session.
 import { Hono, type MiddlewareHandler } from 'hono'
 import { html, raw } from 'hono/html'
 import { getCookie, setCookie } from 'hono/cookie'
-import { timingSafeEqual } from 'hono/utils/buffer'
 import { Marked } from 'marked'
 import * as core from './core'
-import { derive } from './secret'
+import { exportMd, exportName } from './format'
+import { derive, same } from './secret'
 
 type App = { Bindings: Env }
 
@@ -30,15 +30,14 @@ const session = (env: Env) => derive(env.TOKEN, 'web')
 
 const auth: MiddlewareHandler<App> = async (c, next) => {
   if (c.req.path === '/t/login') return next()
-  const v = getCookie(c, COOKIE)
-  if (c.env.TOKEN && v && (await timingSafeEqual(v, await session(c.env)))) return next()
+  if (c.env.TOKEN && (await same(getCookie(c, COOKIE), await session(c.env)))) return next()
   return c.redirect(`/t/login?next=${encodeURIComponent(c.req.path)}`)
 }
 
 const CSS = `body{font:15px/1.55 system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;color:#222}
 a{color:#0b62d6;text-decoration:none}a:hover{text-decoration:underline}
 h2{margin-top:2rem;font-size:1.1rem}ul{padding-left:1.2rem}li{margin:.2rem 0}
-.s{display:inline-block;min-width:4.5rem;font-size:.8rem;color:#666}.id{font-family:ui-monospace,monospace;font-size:.85rem}
+.s{display:inline-block;min-width:4.5rem;font-size:.8rem;color:#666}.id{font-family:ui-monospace,monospace;font-size:.85rem}.l{font-size:.8rem;color:#888}
 table{border-collapse:collapse;font-size:.9rem;margin:1rem 0}td{padding:.15rem 1rem .15rem 0;vertical-align:top}td:first-child{color:#666}
 pre,code{font-family:ui-monospace,monospace;font-size:.85rem}pre{background:#f4f4f4;padding:.7rem;overflow-x:auto}
 .body{border-top:1px solid #ddd;margin-top:1rem}.note{font-size:.9rem}.note span{color:#666;margin-right:.5rem}
@@ -50,18 +49,25 @@ const page = (title: string, body: unknown) =>
 
 type Row = Record<string, any>
 
+const idLink = (id: string) => html`<a class="id" href="/t/${id}">${id}</a>`
+
+const labelLinks = (labels?: string[]) => labels?.map((l) => html` <a class="l" href="/t?label=${encodeURIComponent(l)}">#${l}</a>`) ?? ''
+
 const item = (t: Row) =>
-  html`<li><span class="s">${t.status}</span> <a class="id" href="/t/${t.id}">${t.id}</a> ${t.title}${
+  html`<li><span class="s">${t.status}</span> ${idLink(t.id)} ${t.title}${labelLinks(t.labels)}${
     t.assignee ? html` <small>@${t.assignee}</small>` : ''
   }</li>`
-
-const idLink = (id: string) => html`<a class="id" href="/t/${id}">${id}</a>`
 
 export const web = new Hono<App>()
 
 web.use(auth)
 
-// Only allow redirects to /t paths
+web.onError((err, c) => {
+  const { status, error } = core.errorInfo(err)
+  return c.html(page('cradle', html`<a href="/t">← all</a><p>${error}</p>`), status)
+})
+
+// Redirect to /t paths only
 const safeNext = (n?: string) => (n && /^\/t(\/[\w-]*)?$/.test(n) ? n : '/t')
 
 const loginPage = (next: string, error = '') =>
@@ -79,7 +85,7 @@ web.post('/login', async (c) => {
   const form = await c.req.parseBody()
   const next = safeNext(String(form.next ?? ''))
   const token = String(form.token ?? '')
-  if (!c.env.TOKEN || !(await timingSafeEqual(token, c.env.TOKEN))) return c.html(loginPage(next, 'Wrong token.'), 401)
+  if (!(await same(token, c.env.TOKEN))) return c.html(loginPage(next, 'Wrong token.'), 401)
   setCookie(c, COOKIE, await session(c.env), {
     httpOnly: true,
     secure: new URL(c.req.url).protocol === 'https:',
@@ -92,10 +98,12 @@ web.post('/login', async (c) => {
 
 web.get('/', async (c) => {
   const all = c.req.query('all') === '1'
+  const label = c.req.query('label') || undefined
   const [projects, tickets] = await Promise.all([
     core.listProjects(c.env.DB),
-    core.listTickets(c.env.DB, { all, limit: 500 }),
+    core.listTickets(c.env.DB, { all, label, limit: 500 }),
   ])
+  const qs = (a: boolean) => new URLSearchParams({ ...(a && { all: '1' }), ...(label && { label }) }).toString()
   const groups = projects.map((p: Row) => {
     const rows = tickets.filter((t: Row) => t.id.startsWith(`${p.key}-`))
     return rows.length ? html`<h2>${p.key} · ${p.name}</h2><ul>${rows.map(item)}</ul>` : ''
@@ -103,17 +111,26 @@ web.get('/', async (c) => {
   return c.html(
     page(
       'cradle',
-      html`<h1>cradle</h1><a href="/t${all ? '' : '?all=1'}">${all ? 'hide' : 'show'} done</a>${
+      html`<h1>cradle${label ? html` · #${label}` : ''}</h1><a href="/t?${qs(!all)}">${all ? 'hide' : 'show'} done</a>${
+        label ? html` · <a href="/t${all ? '?all=1' : ''}">all labels</a>` : ''
+      }${
         tickets.length ? groups : html`<p>No tickets.</p>`
       }`,
     ),
   )
 })
 
+web.get('/:file{[A-Za-z]{2,5}-\\d+\\.md}', async (c) => {
+  const t = await core.getTicket(c.env.DB, c.req.param('file').slice(0, -3), { notes: true })
+  c.header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(exportName(t))}`)
+  return c.body(exportMd(t), 200, { 'content-type': 'text/markdown; charset=utf-8' })
+})
+
 web.get('/:id', async (c) => {
   const t: Row = await core.getTicket(c.env.DB, c.req.param('id'), { notes: true })
   const rows: [string, unknown][] = [
     ['status', t.status],
+    ['labels', t.labels?.length && labelLinks(t.labels)],
     ['assignee', t.assignee],
     ['branch', t.branch && html`<code>${t.branch}</code>`],
     ['pr', t.pr && html`<a href="${/^https?:/.test(t.pr) ? t.pr : '#'}">${t.pr}</a>`],
@@ -124,7 +141,7 @@ web.get('/:id', async (c) => {
   return c.html(
     page(
       `${t.id} ${t.title}`,
-      html`<a href="/t">← all</a>
+      html`<a href="/t">← all</a> · <a href="/t/${t.id}.md">export .md</a>
 <h1><span class="id">${t.id}</span> ${t.title}</h1>
 <table>${rows.filter(([, v]) => v).map(([k, v]) => html`<tr><td>${k}</td><td>${v}</td></tr>`)}</table>
 ${t.body ? html`<div class="body">${raw(await md.parse(t.body))}</div>` : ''}

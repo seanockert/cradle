@@ -17,6 +17,7 @@ CREATE TABLE tickets (
   parent TEXT REFERENCES tickets(id),
   pr TEXT,
   body TEXT NOT NULL DEFAULT '',
+  labels TEXT NOT NULL DEFAULT '', -- comma-joined, lowercase, e.g. 'bug,repo:cradle'
   created TEXT NOT NULL DEFAULT (datetime('now')),
   updated TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (project, num)

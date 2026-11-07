@@ -1,10 +1,9 @@
 import { Hono, type MiddlewareHandler } from 'hono'
 import { bearerAuth } from 'hono/bearer-auth'
 import { HTTPException } from 'hono/http-exception'
-import { timingSafeEqual } from 'hono/utils/buffer'
 import * as core from './core'
 import { handleGithub } from './github'
-import { mcpKey } from './secret'
+import { mcpKey, same } from './secret'
 import { handleMcp } from './mcp'
 import { web } from './web'
 
@@ -20,20 +19,13 @@ app.get('/', (c) => c.text('cradle'))
 
 const api = new Hono<{ Bindings: Env }>()
 
-const auth = bearerAuth({
-  verifyToken: async (token, c) => {
-    const want = (c.env as Env).TOKEN
-    return !!want && (await timingSafeEqual(token, want)) // no TOKEN = deny all
-  },
-})
-
-api.use(auth)
+api.use(bearerAuth({ verifyToken: (token, c) => same(token, (c.env as Env).TOKEN) }))
 
 api.get('/projects', async (c) => c.json(await core.listProjects(c.env.DB)))
 
 api.post('/projects', async (c) => c.json({ key: await core.createProject(c.env.DB, await c.req.json()) }, 201))
 
-// ?project=ABC&status=todo,doing&assignee=sean&parent=ABC-1&q=text&all=1&limit=50
+// ?project=ABC&status=todo,doing&assignee=sean&parent=ABC-1&label=bug&q=text&all=1&limit=50
 api.get('/tickets', async (c) => {
   const q = c.req.query()
   const tickets = await core.listTickets(c.env.DB, {
@@ -41,6 +33,7 @@ api.get('/tickets', async (c) => {
     status: q.status?.split(',') as core.ListOpts['status'],
     assignee: q.assignee,
     parent: q.parent,
+    label: q.label,
     q: q.q,
     all: q.all === '1',
     limit: q.limit ? Number(q.limit) : undefined,
@@ -70,8 +63,9 @@ app.route('/api', api)
 const mcpAuth: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
   const want = c.env.TOKEN
   const key = c.req.param('key')
-  const bearer = c.req.header('authorization')?.match(/^Bearer (.+)$/i)?.[1]
-  const ok = !!want && (key ? await timingSafeEqual(key, await mcpKey(want)) : !!bearer && (await timingSafeEqual(bearer, want)))
+  const ok = key
+    ? want && (await same(key, await mcpKey(want)))
+    : await same(c.req.header('authorization')?.match(/^Bearer (.+)$/i)?.[1], want)
   if (ok) return next()
   const message = 'cradle: bad or missing key. Run `cradle mcp` to get the URL.'
   return c.json({ jsonrpc: '2.0', id: null, error: { code: -32001, message } }, 403)
@@ -86,7 +80,7 @@ app.route('/t', web)
 // Signed by GitHub, not the bearer token
 app.post('/gh', async (c) => {
   const [status, text] = await handleGithub(c.req.raw, c.env)
-  return c.text(text, status as 200 | 401)
+  return c.text(text, status)
 })
 
 export default app

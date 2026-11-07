@@ -14,6 +14,7 @@ export class HttpError extends Error {
 export function errorInfo(err: unknown): { status: 400 | 404 | 409 | 500; error: string } {
   if (err instanceof z.ZodError) return { status: 400, error: z.prettifyError(err) }
   if (err instanceof HttpError) return { status: err.status, error: err.message }
+  if (err instanceof SyntaxError) return { status: 400, error: 'invalid JSON' }
   const msg = (err as Error)?.message ?? ''
   if (msg.includes('FOREIGN KEY')) return { status: 400, error: 'unknown project, parent or blocked_by ticket' }
   if (msg.includes('UNIQUE')) return { status: 409, error: 'already exists' }
@@ -31,6 +32,14 @@ export const Id = z
   .regex(/^[A-Za-z]{2,5}-\d+$/, 'ticket id must look like ABC-123')
   .transform((s) => s.toUpperCase())
 
+// e.g. bug, feature, repo:cradle
+const Label = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9][\w.:/-]{0,59}$/, 'label: a-z 0-9 . _ : / -, max 60 chars')
+const Labels = z.array(Label).max(10)
+
 export const ProjectInput = z.object({
   key: Key,
   name: z.string().min(1),
@@ -42,6 +51,7 @@ export const ListInput = z.object({
   status: z.array(Status).optional(),
   assignee: z.string().optional(),
   parent: Id.optional(),
+  label: Label.optional(),
   q: z.string().optional(),
   all: z.boolean().optional(), // include done + cancelled
   limit: z.number().int().min(1).max(500).default(100),
@@ -57,6 +67,7 @@ const CreateInput = z.object({
   branch: z.string().min(1).nullish(),
   body: z.string().default(''),
   blocked_by: z.array(Id).default([]),
+  labels: Labels.default([]),
   note: z.string().min(1).optional(),
 })
 
@@ -72,12 +83,11 @@ const UpdateInput = z.object({
   body: z.string().optional(),
   edits: z.array(z.object({ old: z.string().min(1), new: z.string() })).optional(),
   blocked_by: z.array(Id).optional(),
+  labels: Labels.optional(),
   note: z.string().min(1).optional(),
 })
 
 export type ListOpts = z.input<typeof ListInput>
-
-// --- projects ---
 
 export async function listProjects(db: D1Database) {
   const { results } = await db
@@ -99,8 +109,6 @@ export async function createProject(db: D1Database, input: unknown) {
   return p.key
 }
 
-// --- tickets ---
-
 export async function listTickets(db: D1Database, input: ListOpts) {
   const o = ListInput.parse(input)
   const where: string[] = []
@@ -111,12 +119,16 @@ export async function listTickets(db: D1Database, input: ListOpts) {
   } else if (!o.all) where.push(`t.status NOT IN ${CLOSED}`)
   if (o.assignee) where.push('t.assignee = ?'), args.push(o.assignee)
   if (o.parent) where.push('t.parent = ?'), args.push(o.parent)
-  if (o.q) where.push('(t.title LIKE ? OR t.body LIKE ?)'), args.push(`%${o.q}%`, `%${o.q}%`)
+  if (o.label) where.push(`instr(',' || t.labels || ',', ?)`), args.push(`,${o.label},`)
+  if (o.q) {
+    const like = `%${o.q.replace(/[\\%_]/g, '\\$&')}%`
+    where.push(`(t.title LIKE ? ESCAPE '\\' OR t.body LIKE ? ESCAPE '\\')`), args.push(like, like)
+  }
 
   // blocked_by lists only open blockers
   const { results } = await db
     .prepare(
-      `SELECT t.id, t.status, t.assignee, t.title, t.parent,
+      `SELECT t.id, t.status, t.title, t.labels, t.assignee, t.parent,
         (SELECT group_concat(d.blocked_by) FROM deps d JOIN tickets b ON b.id = d.blocked_by
           WHERE d.ticket = t.id AND b.status NOT IN ${CLOSED}) AS blocked_by
       FROM tickets t ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
@@ -124,7 +136,7 @@ export async function listTickets(db: D1Database, input: ListOpts) {
     )
     .bind(...args, o.limit)
     .all()
-  return results.map((r) => compact({ ...r, blocked_by: (r.blocked_by as string | null)?.split(',') }))
+  return results.map((r) => compact({ ...r, labels: split(r.labels), blocked_by: split(r.blocked_by) }))
 }
 
 export async function getTicket(db: D1Database, rawId: string, opts: { notes?: boolean } = {}) {
@@ -141,6 +153,7 @@ export async function getTicket(db: D1Database, rawId: string, opts: { notes?: b
   const { project, num, ...rest } = ticket // both are in the id
   return compact({
     ...rest,
+    labels: split(rest.labels),
     blocked_by: deps.results.map((r) => r.blocked_by),
     children: kids.results,
     notes: notes?.results,
@@ -156,8 +169,7 @@ export async function saveTickets(db: D1Database, items: unknown[]) {
       ids.push(hasId ? await updateTicket(db, item) : await createTicket(db, item))
     } catch (e) {
       if (items.length === 1) throw e
-      const msg = e instanceof z.ZodError ? z.prettifyError(e) : (e as Error).message
-      throw new HttpError(400, `item ${i} failed: ${msg}. saved: ${ids.join(', ') || 'none'}`)
+      throw new HttpError(400, `item ${i} failed: ${errorInfo(e).error}. saved: ${ids.join(', ') || 'none'}`)
     }
   }
   return ids
@@ -166,28 +178,24 @@ export async function saveTickets(db: D1Database, items: unknown[]) {
 async function createTicket(db: D1Database, input: unknown) {
   const t = CreateInput.parse(input)
   const slug = slugify(t.title)
-  // seq bump + insert in one transaction, so numbers never repeat
+  // One transaction: seq bump, insert, deps, note. Numbers never repeat.
   const [, ins] = await db.batch<{ id: string }>([
     db.prepare('UPDATE projects SET seq = seq + 1 WHERE key = ?').bind(t.project),
     db
       .prepare(
-        `INSERT INTO tickets (id, project, num, title, status, assignee, branch, parent, pr, body)
-        SELECT key || '-' || seq, key, seq, ?, ?, ?, COALESCE(?, lower(key) || '-' || seq || ?), ?, ?, ?
+        `INSERT INTO tickets (id, project, num, title, status, assignee, branch, parent, pr, body, labels)
+        SELECT key || '-' || seq, key, seq, ?, ?, ?, COALESCE(?, lower(key) || '-' || seq || ?), ?, ?, ?, ?
         FROM projects WHERE key = ? RETURNING id`,
       )
       .bind(
         t.title, t.status, t.assignee ?? null, t.branch ?? null, slug ? `-${slug}` : '',
-        t.parent ?? null, t.pr ?? null, t.body, t.project,
+        t.parent ?? null, t.pr ?? null, t.body, joinLabels(t.labels), t.project,
       ),
+    ...t.blocked_by.map((b) => depStmt(db, NEW, t.project, b)),
+    ...(t.note ? [noteStmt(db, NEW, t.project, t.note)] : []),
   ])
   const id = ins.results[0]?.id
   if (!id) throw new HttpError(404, `project ${t.project} not found`)
-
-  const extra = [
-    ...t.blocked_by.map((b) => depStmt(db, id, b)),
-    ...(t.note ? [noteStmt(db, id, t.note)] : []),
-  ]
-  if (extra.length) await db.batch(extra)
   return id
 }
 
@@ -204,7 +212,10 @@ async function updateTicket(db: D1Database, input: unknown) {
 
   const sets = ["updated = datetime('now')"]
   const args: unknown[] = []
-  const fields = { title: u.title, status: u.status, assignee: u.assignee, parent: u.parent, pr: u.pr, branch: u.branch, body }
+  const fields = {
+    title: u.title, status: u.status, assignee: u.assignee, parent: u.parent, pr: u.pr, branch: u.branch, body,
+    labels: u.labels && joinLabels(u.labels),
+  }
   for (const [k, v] of Object.entries(fields)) {
     if (v !== undefined) sets.push(`${k} = ?`), args.push(v)
   }
@@ -212,33 +223,44 @@ async function updateTicket(db: D1Database, input: unknown) {
   const stmts = [db.prepare(`UPDATE tickets SET ${sets.join(', ')} WHERE id = ? RETURNING id`).bind(...args, u.id)]
   if (u.blocked_by) {
     stmts.push(db.prepare('DELETE FROM deps WHERE ticket = ?').bind(u.id))
-    stmts.push(...u.blocked_by.map((b) => depStmt(db, u.id, b)))
+    stmts.push(...u.blocked_by.map((b) => depStmt(db, OLD, u.id, b)))
   }
-  if (u.note) stmts.push(noteStmt(db, u.id, u.note))
+  if (u.note) stmts.push(noteStmt(db, OLD, u.id, u.note))
 
   const [upd] = await db.batch(stmts)
   if (!upd.results.length) throw new HttpError(404, `${u.id} not found`)
   return u.id
 }
 
-// From the GitHub webhook. Opened: link + move to doing. Merged: done.
-export async function linkPr(db: D1Database, id: string, url: string, merged: boolean) {
-  const t = await db.prepare('SELECT status FROM tickets WHERE id = ?').bind(id).first<{ status: string }>()
-  if (!t) return `${id} not found, ignored`
-  const item: Record<string, unknown> = { id, pr: url }
-  if (merged) item.status = 'done', item.note = `merged ${url}`
-  else if (t.status === 'backlog' || t.status === 'todo') item.status = 'doing'
-  await updateTicket(db, item)
-  return `${id} ${item.status ?? t.status}`
+// From the GitHub webhook. Opened: link + move to doing. Merged: done. Both add the repo label.
+export async function linkPr(db: D1Database, id: string, url: string, merged: boolean, repo: string) {
+  const label = `repo:${repo.toLowerCase()}`
+  const stmts = [
+    db
+      .prepare(
+        `UPDATE tickets SET pr = ?, updated = datetime('now'),
+          status = CASE WHEN ? THEN 'done' WHEN status IN ('backlog', 'todo') THEN 'doing' ELSE status END,
+          labels = CASE WHEN instr(',' || labels || ',', ?) THEN labels WHEN labels = '' THEN ? ELSE labels || ',' || ? END
+        WHERE id = ? RETURNING status`,
+      )
+      .bind(url, merged ? 1 : 0, `,${label},`, label, label, id),
+  ]
+  if (merged) stmts.push(noteStmt(db, OLD, id, `merged ${url}`))
+  const [upd] = await db.batch<{ status: string }>(stmts)
+  const status = upd.results[0]?.status
+  return status ? `${id} ${status}` : `${id} not found, ignored`
 }
 
-// --- helpers ---
+// Ticket id as a SELECT: inserts join the batch and do nothing if the ticket is missing.
+// NEW is the id that create's seq bump just made; bind the project key. OLD: bind the id.
+const NEW = `SELECT key || '-' || seq, ? FROM projects WHERE key = ?`
+const OLD = `SELECT id, ? FROM tickets WHERE id = ?`
 
-const depStmt = (db: D1Database, id: string, b: string) =>
-  db.prepare('INSERT OR IGNORE INTO deps (ticket, blocked_by) VALUES (?, ?)').bind(id, b)
+const depStmt = (db: D1Database, from: string, ref: string, b: string) =>
+  db.prepare(`INSERT OR IGNORE INTO deps (ticket, blocked_by) ${from}`).bind(b, ref)
 
-const noteStmt = (db: D1Database, id: string, text: string) =>
-  db.prepare('INSERT INTO notes (ticket, text) VALUES (?, ?)').bind(id, text)
+const noteStmt = (db: D1Database, from: string, ref: string, text: string) =>
+  db.prepare(`INSERT INTO notes (ticket, text) ${from}`).bind(text, ref)
 
 // Each `old` must match exactly once, like str_replace
 function applyEdits(body: string, edits: { old: string; new: string }[]) {
@@ -250,13 +272,14 @@ function applyEdits(body: string, edits: { old: string; new: string }[]) {
   return body
 }
 
+// Max 40 chars, cut at a word boundary
 export function slugify(s: string) {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .slice(0, 40)
-    .replace(/^-+|-+$/g, '')
+  const slug = s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  return slug.length <= 40 ? slug : slug.slice(0, 41).replace(/-[^-]*$/, '').slice(0, 40)
 }
+
+const joinLabels = (l: string[]) => [...new Set(l)].join(',')
+const split = (v: unknown) => (v ? String(v).split(',') : undefined)
 
 // Drop null, undefined and empty arrays to save tokens
 function compact<T extends Record<string, unknown>>(o: T) {

@@ -9,6 +9,7 @@
     "db:remote": "wrangler d1 migrations apply cradle --remote",
     "types": "wrangler types",
     "check": "tsc --noEmit && tsc --noEmit -p tsconfig.cli.json",
+    "test": "bun test",
     "cli:build": "bun build src/cli.ts --compile --outfile dist/cradle"
   },
   "dependencies": {

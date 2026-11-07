@@ -8,19 +8,22 @@ import { lines, projectLines, ticketMd } from './format'
 const instructions = (origin: string) => `Cradle is a ticket tracker. IDs look like ABC-123. Each ticket has a git branch.
 To work on a ticket: get it, check it against the latest main, fix stale facts (save with edits), check out its branch (create it if missing), save status doing. After opening a PR, save pr=<url>. Merging the PR sets status done if the repo has the cradle webhook; else set it yourself.
 Use edits, not a full body, to change part of a body. Use note for progress and decisions.
+Labels: bug, feature, improvement, chore, and repo:<name> for the code repo.
 Ticket page for PR bodies: ${origin}/t/<id>`
 
 const Status = z.enum(core.STATUSES)
-const Id = z.string().describe('e.g. ABC-123')
+const Id = z.string()
 
+// core validates; this schema only guides the agent, so keep it short
 const SaveItem = z.object({
-  id: Id.optional().describe('omit to create'),
+  id: Id.optional().describe('ABC-123. Omit to create'),
   project: z.string().optional().describe('key, needed to create'),
   title: z.string().optional().describe('needed to create'),
   status: Status.optional(),
   assignee: z.string().nullable().optional(),
   parent: Id.nullable().optional(),
   blocked_by: z.array(Id).optional().describe('replaces the list'),
+  labels: z.array(z.string()).optional().describe('replaces the list'),
   body: z.string().optional().describe('markdown, replaces body'),
   edits: z
     .array(z.object({ old: z.string(), new: z.string() }))
@@ -56,13 +59,20 @@ function server(db: D1Database, origin: string) {
         status: z.array(Status).optional(),
         assignee: z.string().optional(),
         parent: Id.optional(),
+        label: z.string().optional(),
         q: z.string().optional().describe('text in title or body'),
         all: z.boolean().optional(),
         limit: z.number().int().optional().describe('default 50'),
       },
       annotations: { readOnlyHint: true },
     },
-    run(async (a) => lines(await core.listTickets(db, { ...a, limit: a.limit ?? 50 }))),
+    run(async (a) => {
+      // Fetch one extra row to tell the agent when the list is cut off
+      const limit = Math.min(a.limit ?? 50, 499)
+      const rows = await core.listTickets(db, { ...a, limit: limit + 1 })
+      const more = rows.length > limit ? `\n(more: narrow the filter or raise limit)` : ''
+      return lines(rows.slice(0, limit)) + more
+    }),
   )
 
   s.registerTool(
