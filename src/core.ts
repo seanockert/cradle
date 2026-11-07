@@ -1,11 +1,12 @@
 // Ticket operations. REST, MCP and webhook all call these.
 import { z } from 'zod'
+import { repoName } from './format'
 
 export const STATUSES = ['backlog', 'todo', 'doing', 'done', 'cancelled'] as const
 const CLOSED = `('done', 'cancelled')`
 
 export class HttpError extends Error {
-  constructor(public status: 400 | 404, message: string) {
+  constructor(public status: 400 | 404 | 409, message: string) {
     super(message)
   }
 }
@@ -40,6 +41,12 @@ const Label = z
   .regex(/^[a-z0-9][\w.:/-]{0,59}$/, 'label: a-z 0-9 . _ : / -, max 60 chars')
 const Labels = z.array(Label).max(10)
 
+// Git repo name. Takes "cradle", "owner/cradle" or a git URL.
+export const Repo = z
+  .string()
+  .transform(repoName)
+  .pipe(z.string().regex(/^[a-z0-9._-]{1,100}$/, 'repo: git repo name, e.g. cradle'))
+
 // Exact-text replacements, like str_replace
 const Edits = z.array(z.object({ old: z.string().min(1), new: z.string() }))
 
@@ -49,6 +56,7 @@ const ProjectInput = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
   edits: Edits.optional(),
+  repos: z.array(Repo).max(10).optional(),
 })
 
 export const ListInput = z.object({
@@ -97,24 +105,36 @@ export type ListOpts = z.input<typeof ListInput>
 export async function listProjects(db: D1Database) {
   const { results } = await db
     .prepare(
-      `SELECT key, name, description,
+      `SELECT key, name, repos, description,
         (SELECT count(*) FROM tickets t WHERE t.project = p.key AND t.status NOT IN ${CLOSED}) AS open
       FROM projects p ORDER BY key`,
     )
     .all()
-  return results.map(compact)
+  return results.map((r) => compact({ ...r, repos: split(r.repos) }))
 }
 
 // Full context + ticket counts by status
 export async function getProject(db: D1Database, rawKey: string) {
   const key = Key.parse(rawKey)
   const [p, counts] = await db.batch<Record<string, unknown>>([
-    db.prepare('SELECT key, name, description FROM projects WHERE key = ?').bind(key),
+    db.prepare('SELECT key, name, repos, description FROM projects WHERE key = ?').bind(key),
     db.prepare('SELECT status, count(*) AS n FROM tickets WHERE project = ? GROUP BY status').bind(key),
   ])
-  const row = p.results[0] as { key: string; name: string; description: string | null } | undefined
+  const row = p.results[0] as { key: string; name: string; repos: string; description: string | null } | undefined
   if (!row) throw new HttpError(404, `project ${key} not found`)
-  return compact({ ...row, tickets: Object.fromEntries(counts.results.map((r) => [r.status, r.n])) })
+  const tickets = Object.fromEntries(counts.results.map((r) => [r.status, r.n]))
+  return compact({ ...row, repos: split(row.repos), tickets })
+}
+
+// The project that owns a git repo
+export async function projectForRepo(db: D1Database, rawRepo: string) {
+  const repo = Repo.parse(rawRepo)
+  const row = await db
+    .prepare(`SELECT key FROM projects WHERE instr(',' || repos || ',', ?)`)
+    .bind(`,${repo},`)
+    .first<{ key: string }>()
+  if (!row) throw new HttpError(404, `no project has repo ${repo}. Add it: project key=ABC repos=[${repo}]`)
+  return getProject(db, row.key)
 }
 
 export async function saveProject(db: D1Database, input: unknown) {
@@ -125,13 +145,31 @@ export async function saveProject(db: D1Database, input: unknown) {
     if (!cur) throw new HttpError(404, `project ${p.key} not found`)
     description = applyEdits(description ?? cur.description ?? '', p.edits)
   }
+  // One project per repo, so a repo lookup is never ambiguous
+  if (p.repos?.length) {
+    const { results } = await db
+      .prepare(`SELECT key, repos FROM projects WHERE key != ? AND repos != ''`)
+      .bind(p.key)
+      .all<{ key: string; repos: string }>()
+    for (const o of results) {
+      const dup = p.repos.find((r) => o.repos.split(',').includes(r))
+      if (dup) throw new HttpError(409, `repo ${dup} is in project ${o.key}`)
+    }
+  }
+  const repos = p.repos && joinList(p.repos)
   const upd = await db
-    .prepare('UPDATE projects SET name = COALESCE(?, name), description = COALESCE(?, description) WHERE key = ? RETURNING key')
-    .bind(p.name ?? null, description ?? null, p.key)
+    .prepare(
+      `UPDATE projects SET name = COALESCE(?, name), description = COALESCE(?, description), repos = COALESCE(?, repos)
+      WHERE key = ? RETURNING key`,
+    )
+    .bind(p.name ?? null, description ?? null, repos ?? null, p.key)
     .first()
   if (upd) return p.key
   if (!p.name) throw new HttpError(404, `project ${p.key} not found. Give a name to create it`)
-  await db.prepare('INSERT INTO projects (key, name, description) VALUES (?, ?, ?)').bind(p.key, p.name, description ?? null).run()
+  await db
+    .prepare('INSERT INTO projects (key, name, description, repos) VALUES (?, ?, ?, ?)')
+    .bind(p.key, p.name, description ?? null, repos ?? '')
+    .run()
   return p.key
 }
 
@@ -215,7 +253,7 @@ async function createTicket(db: D1Database, input: unknown) {
       )
       .bind(
         t.title, t.status, t.assignee ?? null, t.branch ?? null, slug ? `-${slug}` : '',
-        t.parent ?? null, t.pr ?? null, t.body, joinLabels(t.labels), t.project,
+        t.parent ?? null, t.pr ?? null, t.body, joinList(t.labels), t.project,
       ),
     ...t.blocked_by.map((b) => depStmt(db, NEW, t.project, b)),
     ...(t.note ? [noteStmt(db, NEW, t.project, t.note)] : []),
@@ -240,7 +278,7 @@ async function updateTicket(db: D1Database, input: unknown) {
   const args: unknown[] = []
   const fields = {
     title: u.title, status: u.status, assignee: u.assignee, parent: u.parent, pr: u.pr, branch: u.branch, body,
-    labels: u.labels && joinLabels(u.labels),
+    labels: u.labels && joinList(u.labels),
   }
   for (const [k, v] of Object.entries(fields)) {
     if (v !== undefined) sets.push(`${k} = ?`), args.push(v)
@@ -304,7 +342,7 @@ export function slugify(s: string) {
   return slug.length <= 40 ? slug : slug.slice(0, 41).replace(/-[^-]*$/, '').slice(0, 40)
 }
 
-const joinLabels = (l: string[]) => [...new Set(l)].join(',')
+const joinList = (l: string[]) => [...new Set(l)].join(',')
 const split = (v: unknown) => (v ? String(v).split(',') : undefined)
 
 // Drop null, undefined and empty arrays to save tokens

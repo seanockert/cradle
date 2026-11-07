@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, basename } from 'node:path'
-import { EDITABLE, TEMPLATE, arr, exportMd, exportName, lines, missing, parseMd, projectLines, projectMd, str, ticketMd, toStatus } from './format'
+import { EDITABLE, TEMPLATE, arr, exportMd, exportName, lines, missing, parseMd, projectLines, projectMd, repoName, str, ticketMd, toStatus } from './format'
 import { mcpKey, webhookSecret } from './secret'
 
 const HELP = `cradle - tickets for agents
@@ -21,9 +21,9 @@ const HELP = `cradle - tickets for agents
   cradle export ID [ID...] [-o DIR|FILE.md|-]          Backlog.md format, with notes
   cradle export -p ABC [--all] [-o DIR]                all open (or --all) tickets in a project
   cradle project                       list projects
-  cradle project KEY                   goal, context and ticket counts
-  cradle project new KEY "Name" [-b context | -f file|-]
-  cradle project edit KEY [-t name] [-b context | -f file|-] [-e]
+  cradle project KEY|.                 goal, context, repos, ticket counts. . = this git repo's project
+  cradle project new KEY "Name" [-r repo,repo] [-b context | -f file|-]
+  cradle project edit KEY [-t name] [-r repo,repo] [-b context | -f file|-] [-e]
   cradle config URL TOKEN
   cradle mcp [add]                     print MCP URL + config. add: set up Claude Code
   cradle gh hook [owner/repo]          add webhook: PR opened -> doing, merged -> done
@@ -31,7 +31,7 @@ const HELP = `cradle - tickets for agents
   --json   raw JSON output
   Ticket body: ## Goal, ## Done when (- [ ] testable items), ## Verify. new -e opens this template.
   Labels: bug, feature, improvement, chore, repo:<name>. -l replaces the list; -l '' clears.
-  Project default: CRADLE_PROJECT env, or a .cradle file (with a key, e.g. ABC) in this or a parent dir.`
+  Project for new/import: -p, then CRADLE_PROJECT, then the project that owns this git repo (-r on project).`
 
 const CONFIG = join(homedir(), '.config', 'cradle', 'config.json')
 
@@ -44,6 +44,7 @@ const parsed = (() => {
         status: { type: 'string', short: 's' },
         assignee: { type: 'string', short: 'a' },
         labels: { type: 'string', short: 'l' },
+        repo: { type: 'string', short: 'r' },
         title: { type: 'string', short: 't' },
         body: { type: 'string', short: 'b' },
         file: { type: 'string', short: 'f' },
@@ -99,14 +100,22 @@ const out = (data: unknown, text: () => string) => console.log(o.json ? JSON.str
 const ID = /^[A-Za-z]{2,5}-\d+$/
 const need = (v: string | undefined, usage: string) => v ?? die(`usage: ${usage}`)
 
-function defaultProject() {
+// Repo name from the origin remote, else the repo folder. undefined outside git.
+function currentRepo() {
+  const url = run(['git', 'remote', 'get-url', 'origin'])
+  if (url.ok) return repoName(url.out)
+  const top = run(['git', 'rev-parse', '--show-toplevel'])
+  return top.ok ? repoName(top.out) : undefined
+}
+
+const projectForRepo = (repo: string) => api('GET', `/repos/${encodeURIComponent(repo)}`)
+
+// -p, then CRADLE_PROJECT, then the project that owns this git repo
+async function defaultProject(): Promise<string> {
   if (o.project) return o.project
   if (process.env.CRADLE_PROJECT) return process.env.CRADLE_PROJECT
-  for (let d = process.cwd(); ; d = dirname(d)) {
-    const f = join(d, '.cradle')
-    if (existsSync(f)) return readFileSync(f, 'utf8').trim()
-    if (d === dirname(d)) return die('no project. use -p ABC or add a .cradle file')
-  }
+  const repo = currentRepo() ?? die('no project. Use -p ABC, or run in a git repo that a project owns')
+  return (await projectForRepo(repo)).key
 }
 
 async function readInput(file: string) {
@@ -151,7 +160,7 @@ const cmds: Record<string, () => Promise<void>> = {
     const title = need(args[1], 'cradle new "Title" [-p ABC]')
     const body = o.editor ? (editText('new.md', TEMPLATE) ?? die('no change, not created')).trim() : await bodyArg()
     const r = await api('POST', '/tickets', {
-      project: defaultProject(),
+      project: await defaultProject(),
       title,
       status: o.status,
       assignee: o.assignee,
@@ -217,7 +226,7 @@ const cmds: Record<string, () => Promise<void>> = {
   async import() {
     const file = need(args[1], 'cradle import FILE|- [-p ABC] [--split]')
     const { fm, title, body } = parseMd(await readInput(file))
-    const project = defaultProject().toUpperCase()
+    const project = (await defaultProject()).toUpperCase()
     // Cradle keys, else Backlog.md keys. A file from another project or tracker keeps no id links.
     const foreign = !!fm.id && !str(fm.id)!.toUpperCase().startsWith(`${project}-`)
     const ids = (v?: string | string[]) => {
@@ -286,21 +295,24 @@ const cmds: Record<string, () => Promise<void>> = {
 
   async project() {
     const [, sub, key, name] = args
+    const repos = o.repo !== undefined ? arr(o.repo) : undefined
     if (sub === 'new') {
-      const usage = 'cradle project new KEY "Name" [-b context | -f file|-]'
-      const r = await api('POST', '/projects', { key: need(key, usage), name: need(name, usage), description: await bodyArg() })
+      const usage = 'cradle project new KEY "Name" [-r repo,repo] [-b context | -f file|-]'
+      const body = { key: need(key, usage), name: need(name, usage), repos, description: await bodyArg() }
+      const r = await api('POST', '/projects', body)
       return out(r, () => r.key)
     }
     if (sub === 'edit') {
-      const k = need(key, 'cradle project edit KEY [-t name] [-b context | -f file|-] [-e]')
+      const k = need(key, 'cradle project edit KEY [-t name] [-r repo,repo] [-b context | -f file|-] [-e]')
       if (o.editor) return editProject(k)
-      const patch = { name: o.title, description: await bodyArg() }
+      const patch = { name: o.title, repos, description: await bodyArg() }
       if (Object.values(patch).every((v) => v === undefined)) die('nothing to change')
       const r = await api('PATCH', `/projects/${k}`, patch)
       return out(r, () => 'ok')
     }
     if (sub) {
-      const p = await api('GET', `/projects/${sub}`)
+      const repo = sub === '.' ? (currentRepo() ?? die('not in a git repo')) : undefined
+      const p = await (repo ? projectForRepo(repo) : api('GET', `/projects/${sub}`))
       return out(p, () => projectMd(p).trimEnd())
     }
     const rows = await api('GET', '/projects')

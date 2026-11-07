@@ -35,7 +35,7 @@ REST and MCP call the same `core` functions. They cannot drift.
 ## Data (D1)
 
 ```sql
-projects(key PK, name, description, seq)         -- key: 2-5 uppercase letters, e.g. ABC. description: markdown goal + context
+projects(key PK, name, description, repos, seq)  -- key: 2-5 uppercase letters, e.g. ABC. description: markdown goal + context
 tickets(id PK, project, num, title, status, assignee, branch, parent, pr,
         body, labels, created, updated)          -- id: ABC-123
 deps(ticket, blocked_by)
@@ -43,6 +43,7 @@ notes(id, ticket, ts, text)                      -- append-only
 ```
 
 - Project context: `description` holds the goal and context as markdown. Lists show its first non-heading line; getting one project shows all of it plus ticket counts. Save creates (needs name) or updates; `edits` change part of it.
+- Project repos: git repo names the project owns (`cradle,cradle-web`), lowercase, max 10. One project per repo, so lookup by repo is exact. Accepts `owner/name` or a git URL and keeps the name. Agents call `project repo=<name>`; the CLI uses the current repo for `new` and `import`.
 - Ticket numbers are per project. One D1 batch (a transaction) bumps `projects.seq`, inserts the ticket, its deps and note. A failure rolls back all of it, so numbers never skip or repeat.
 - Status: `backlog | todo | doing | done | cancelled`.
 - Branch: `abc-123-<title-slug>`, slug max 40 chars, cut at a word. You can override it.
@@ -67,13 +68,13 @@ notes(id, ticket, ts, text)                      -- append-only
 | `list` | Filter by project, status, assignee, label or text. Done is hidden by default. | `ABC-123 [todo] Fix auth redirect #bug @sean` per line |
 | `get` | One ticket. `notes:true` adds the log. | Markdown + frontmatter: status, assignee, branch, pr, parent, blocked_by |
 | `save` | Create or update. Takes an array. Edits body with `edits: [{old,new}]`. `note` appends to the log. | IDs only |
-| `project` | No args: list. `key`: goal, context, ticket counts. `key` + fields: create or update, `edits` for part of the context. | Lines, markdown, or key |
+| `project` | No args: list. `repo` or `key`: goal, context, repos, ticket counts. `key` + fields: create or update; `repos` sets the repos, `edits` change part of the context. | Lines, markdown, or key |
 
 Rules: tool descriptions under 30 words. Lists never include body. Default limit 50; a cut-off list ends with a `(more: ...)` line. Timestamps to the minute.
 
 Server `instructions` (sent once when the agent connects, about 900 bytes). Full text in `src/mcp.ts`. They cover:
 
-- Read the project goal and context before work. Keep tickets aligned with it.
+- Find the project with `project repo=<git repo name>`. Read its goal and context before work. Keep tickets aligned with it. If no project owns the repo, ask the user.
 - Ticket writing standard (below). Labels: one type + `repo:<name>`.
 - Work flow: get, check against main, branch, status doing, notes.
 - Before a PR: run Verify, tick each Done when item. Then save `pr`.
@@ -105,16 +106,16 @@ cradle branch ID
 cradle import FILE|- [-p ABC] [-s status] [--split]
 cradle export ID [ID...] [-o DIR|FILE.md|-]
 cradle export -p ABC [--all] [-o DIR]
-cradle project [KEY]          # list, or one project's goal + context
-cradle project new KEY "Name" [-b context | -f file|-]
-cradle project edit KEY [-t name] [-b context | -f file|-] [-e]
+cradle project [KEY|.]        # list, or one project's goal + context. . = this git repo's project
+cradle project new KEY "Name" [-r repo,repo] [-b context | -f file|-]
+cradle project edit KEY [-t name] [-r repo,repo] [-b context | -f file|-] [-e]
 cradle mcp [add]              # MCP URL + config, or add to Claude Code
 cradle gh hook [owner/repo]   # PR opened -> doing, merged -> done
 cradle config URL TOKEN       # writes ~/.config/cradle/config.json (or use CRADLE_URL, CRADLE_TOKEN)
 --json                        # compact JSON
 ```
 
-- Default project for `new` and `import`: `-p`, then `CRADLE_PROJECT`, then a `.cradle` file (contains `ABC`) in this or a parent dir.
+- Default project for `new` and `import`: `-p`, then `CRADLE_PROJECT`, then the project that owns the current git repo (origin remote name, else the repo folder name).
 - Import: frontmatter `title`, else H1, else the file name. `--split` makes each `##` section a sub-ticket under one parent. Reads cradle and Backlog.md keys (`dependencies`, `parent_task_id`, `To Do`/`In Progress` statuses). If the file `id` is from another project, links to other tickets are dropped with a warning.
 - Export: Backlog.md task format. YAML frontmatter (`id, title, status, assignee[], labels[], created_date, updated_date, dependencies, parent_task_id`, plus `branch`, `pr`), then the body, then `## Notes`. File name `abc-1 - Title.md`. The web view serves the same file at `/t/ABC-1.md`.
 - Dropped for simplicity: `search` (use `ls -q`), `board`.

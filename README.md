@@ -62,12 +62,14 @@ cradle new "Add CSV export" -e       # opens the template in $EDITOR
 
 ## Project context
 
-Each project has a goal and context (markdown). Agents read it before they work on its tickets, so the work stays aligned.
+Each project has a goal and context (markdown) and owns one or more git repos. Agents find the project from the repo they are in and read it before they work on its tickets, so the work stays aligned. Inside an owned repo, `cradle new` and `cradle import` need no `-p`.
 
 ```sh
-cradle project new WEB "Website" -f goal.md
-cradle project WEB                   # goal, context, ticket counts
+cradle project new WEB "Website" -r website -f goal.md
+cradle project WEB                   # goal, context, repos, ticket counts
+cradle project .                     # the project that owns this git repo
 cradle project edit WEB -e           # edit in $EDITOR
+cradle project edit WEB -r website,website-api   # set its repos
 ```
 
 ## Web view

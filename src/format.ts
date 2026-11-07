@@ -26,9 +26,17 @@ export function summary(md?: string) {
   return l.length > 100 ? `${l.slice(0, 99)}…` : l
 }
 
+// Repo name from "cradle", "owner/cradle" or a git URL
+export const repoName = (s: string) => s.trim().toLowerCase().replace(/\.git$/, '').split(/[/:]/).pop() ?? ''
+
+const repoTag = (p: Row) => (p.repos?.length ? ` [${p.repos.join(', ')}]` : '')
+
+// ABC Shop [shop, shop-api] (3 open) - Sell prints online.
 export const projectLines = (rows: Row[]) =>
   rows.length
-    ? rows.map((p) => `${p.key} ${p.name} (${p.open} open)${p.description ? ` - ${summary(p.description)}` : ''}`).join('\n')
+    ? rows
+        .map((p) => `${p.key} ${p.name}${repoTag(p)} (${p.open} open)${p.description ? ` - ${summary(p.description)}` : ''}`)
+        .join('\n')
     : 'no projects'
 
 const ORDER = ['backlog', 'todo', 'doing', 'done', 'cancelled']
@@ -36,7 +44,8 @@ const ORDER = ['backlog', 'todo', 'doing', 'done', 'cancelled']
 // One project: name, ticket counts, full context
 export function projectMd(p: Row) {
   const counts = ORDER.filter((s) => p.tickets?.[s]).map((s) => `${p.tickets[s]} ${s}`)
-  return `# ${p.key} ${p.name}\ntickets: ${counts.join(', ') || 'none'}\n\n${p.description?.trim() || 'No context yet.'}\n`
+  const repos = p.repos?.length ? `repos: ${p.repos.join(', ')}\n` : ''
+  return `# ${p.key} ${p.name}\n${repos}tickets: ${counts.join(', ') || 'none'}\n\n${p.description?.trim() || 'No context yet.'}\n`
 }
 
 // Ticket body standard: another agent can do and verify the work with no other context

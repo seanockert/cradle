@@ -131,7 +131,7 @@ web.get('/p/:key', async (c) => {
     page(
       `${p.key} ${p.name}`,
       html`<a href="/t">← all</a>
-<h1>${p.key} · ${p.name}</h1>
+<h1>${p.key} · ${p.name}</h1>${p.repos?.length ? html`<p class="ctx">repos: ${p.repos.join(', ')}</p>` : ''}
 ${p.description ? html`<div class="body">${raw(await md.parse(p.description))}</div>` : html`<p>No context yet.</p>`}
 <h2>Open tickets</h2>${tickets.length ? html`<ul>${tickets.map(item)}</ul>` : html`<p>None.</p>`}`,
     ),

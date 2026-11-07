@@ -23,6 +23,8 @@ api.use(bearerAuth({ verifyToken: (token, c) => same(token, (c.env as Env).TOKEN
 
 api.get('/projects', async (c) => c.json(await core.listProjects(c.env.DB)))
 
+api.get('/repos/:repo', async (c) => c.json(await core.projectForRepo(c.env.DB, c.req.param('repo'))))
+
 api.get('/projects/:key', async (c) => c.json(await core.getProject(c.env.DB, c.req.param('key'))))
 
 // Create, or update given fields

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { slugify } from '../src/core'
-import { TEMPLATE, arr, exportMd, exportName, line, missing, parseMd, projectMd, str, summary, ticketMd, toStatus } from '../src/format'
+import { TEMPLATE, arr, exportMd, exportName, line, missing, parseMd, projectMd, repoName, str, summary, ticketMd, toStatus } from '../src/format'
 import { ticketId } from '../src/github'
 
 test('ticketId: branch, Linear-style branch, title fallback', () => {
@@ -73,4 +73,11 @@ test('missing body sections', () => {
   expect(missing(TEMPLATE)).toEqual([])
   expect(missing('## goal\nx\n## Done when\n- [ ] y')).toEqual(['Verify'])
   expect(missing(undefined)).toEqual(['Goal', 'Done when', 'Verify'])
+})
+
+test('repoName from name, owner/name and git URLs', () => {
+  expect(repoName('Cradle')).toBe('cradle')
+  expect(repoName('seanockert/cradle')).toBe('cradle')
+  expect(repoName('https://github.com/seanockert/cradle.git')).toBe('cradle')
+  expect(repoName('git@github.com:seanockert/cradle.git')).toBe('cradle')
 })

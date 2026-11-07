@@ -6,7 +6,7 @@ import * as core from './core'
 import { lines, missing, projectLines, projectMd, ticketMd } from './format'
 
 const instructions = (origin: string) => `Cradle is a ticket tracker. IDs look like ABC-123. Each ticket has a git branch.
-Each project (the ABC in ABC-123) has a goal and context: ## Goal, ## Constraints, ## Not in scope. Read it (project key=ABC) once before you work on its tickets. Keep the work aligned with it. If the goal changes, update it.
+Each project (the ABC in ABC-123) owns git repos and has a goal and context: ## Goal, ## Constraints, ## Not in scope. Find it with project repo=<git repo name> and read it once before you work on its tickets. If no project owns the repo, ask the user which project to add it to. Keep the work aligned with the goal. If the goal changes, update it.
 Write each ticket so another agent can do and verify the work with no other context:
 - Title: imperative, one outcome.
 - Body: ## Goal (why, 1-3 sentences, linked to the project goal). ## Done when (- [ ] list, each item testable). ## Verify (commands or steps that prove each item). Add ## Context (files, links, limits) only if needed.
@@ -114,15 +114,18 @@ function server(db: D1Database, origin: string) {
     'project',
     {
       description:
-        'No args: list projects. key only: get its goal and context. key + other fields: create (needs name) or update. Key is the ticket prefix.',
+        'No args: list projects. repo or key only: get goal and context. key + other fields: create (needs name) or update. Key is the ticket prefix.',
       inputSchema: {
         key: z.string().optional(),
+        repo: z.string().optional().describe('git repo name: get the project that owns it'),
+        repos: z.array(z.string()).optional().describe('git repo names it owns, replaces the list'),
         name: z.string().optional(),
         description: z.string().optional().describe('markdown goal and context, replaces it'),
         edits: Edits,
       },
     },
-    run(async ({ key, ...rest }) => {
+    run(async ({ key, repo, ...rest }) => {
+      if (!key && repo) return projectMd(await core.projectForRepo(db, repo)).trimEnd()
       if (!key) return projectLines(await core.listProjects(db))
       if (Object.values(rest).every((v) => v === undefined)) return projectMd(await core.getProject(db, key)).trimEnd()
       return core.saveProject(db, { key, ...rest })
