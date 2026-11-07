@@ -2,6 +2,7 @@ CREATE TABLE projects (
   key TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   description TEXT,
+  repos TEXT NOT NULL DEFAULT '', -- git repo names, comma-joined, lowercase. One project per repo
   seq INTEGER NOT NULL DEFAULT 0
 );
 
