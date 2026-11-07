@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cradle",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cradle",
+      "database_id": "619b74df-2182-405d-8438-8a7287a8a0cf",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
