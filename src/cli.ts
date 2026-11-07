@@ -3,14 +3,14 @@ import { parseArgs } from 'node:util'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, basename } from 'node:path'
-import { EDITABLE, arr, exportMd, exportName, lines, parseMd, projectLines, str, ticketMd, toStatus } from './format'
+import { EDITABLE, TEMPLATE, arr, exportMd, exportName, lines, missing, parseMd, projectLines, projectMd, str, ticketMd, toStatus } from './format'
 import { mcpKey, webhookSecret } from './secret'
 
 const HELP = `cradle - tickets for agents
 
   cradle ls [-p ABC] [-s todo,doing] [-a name] [-l label] [-q text] [--parent ID] [--all]
   cradle show ID [-n]                  -n adds notes
-  cradle new "Title" [-p ABC] [-s status] [-a name] [-l bug,repo:x] [-b body | -f file|-] [--parent ID] [--blocked-by ID,ID]
+  cradle new "Title" [-p ABC] [-s status] [-a name] [-l bug,repo:x] [-b body | -f file|- | -e] [--parent ID] [--blocked-by ID,ID]
   cradle edit ID [-t title] [-s status] [-a name] [-l labels] [--pr url] [--parent ID] [--blocked-by ID,ID] [-b body | -f file|-]
   cradle edit ID -e                    edit in $EDITOR
   cradle mv ID [ID...] STATUS          statuses: backlog todo doing done cancelled
@@ -20,12 +20,16 @@ const HELP = `cradle - tickets for agents
   cradle import FILE|- [-p ABC] [-s status] [--split]   reads cradle and Backlog.md files
   cradle export ID [ID...] [-o DIR|FILE.md|-]          Backlog.md format, with notes
   cradle export -p ABC [--all] [-o DIR]                all open (or --all) tickets in a project
-  cradle project [new KEY "Name" [description]]
+  cradle project                       list projects
+  cradle project KEY                   goal, context and ticket counts
+  cradle project new KEY "Name" [-b context | -f file|-]
+  cradle project edit KEY [-t name] [-b context | -f file|-] [-e]
   cradle config URL TOKEN
   cradle mcp [add]                     print MCP URL + config. add: set up Claude Code
   cradle gh hook [owner/repo]          add webhook: PR opened -> doing, merged -> done
 
   --json   raw JSON output
+  Ticket body: ## Goal, ## Done when (- [ ] testable items), ## Verify. new -e opens this template.
   Labels: bug, feature, improvement, chore, repo:<name>. -l replaces the list; -l '' clears.
   Project default: CRADLE_PROJECT env, or a .cradle file (with a key, e.g. ABC) in this or a parent dir.`
 
@@ -145,6 +149,7 @@ const cmds: Record<string, () => Promise<void>> = {
 
   async new() {
     const title = need(args[1], 'cradle new "Title" [-p ABC]')
+    const body = o.editor ? (editText('new.md', TEMPLATE) ?? die('no change, not created')).trim() : await bodyArg()
     const r = await api('POST', '/tickets', {
       project: defaultProject(),
       title,
@@ -153,8 +158,10 @@ const cmds: Record<string, () => Promise<void>> = {
       parent: o.parent,
       blocked_by: arr(o['blocked-by']),
       labels: arr(o.labels),
-      body: await bodyArg(),
+      body,
     })
+    const gaps = missing(body)
+    if (gaps.length) console.error(`${r.ids[0]} missing ${gaps.map((h) => `## ${h}`).join(', ')}`)
     out(r, () => r.ids[0])
   },
 
@@ -278,11 +285,23 @@ const cmds: Record<string, () => Promise<void>> = {
   },
 
   async project() {
-    if (args[1] === 'new') {
-      const key = need(args[2], 'cradle project new KEY "Name" [description]')
-      const name = need(args[3], 'cradle project new KEY "Name" [description]')
-      const r = await api('POST', '/projects', { key, name, description: args[4] })
+    const [, sub, key, name] = args
+    if (sub === 'new') {
+      const usage = 'cradle project new KEY "Name" [-b context | -f file|-]'
+      const r = await api('POST', '/projects', { key: need(key, usage), name: need(name, usage), description: await bodyArg() })
       return out(r, () => r.key)
+    }
+    if (sub === 'edit') {
+      const k = need(key, 'cradle project edit KEY [-t name] [-b context | -f file|-] [-e]')
+      if (o.editor) return editProject(k)
+      const patch = { name: o.title, description: await bodyArg() }
+      if (Object.values(patch).every((v) => v === undefined)) die('nothing to change')
+      const r = await api('PATCH', `/projects/${k}`, patch)
+      return out(r, () => 'ok')
+    }
+    if (sub) {
+      const p = await api('GET', `/projects/${sub}`)
+      return out(p, () => projectMd(p).trimEnd())
     }
     const rows = await api('GET', '/projects')
     out(rows, () => projectLines(rows))
@@ -330,16 +349,35 @@ const cmds: Record<string, () => Promise<void>> = {
   },
 }
 
-async function editInEditor(id: string) {
-  const t = await api('GET', `/tickets/${id}`)
-  const before = ticketMd({ ...t, children: [] })
-  const path = join(tmpdir(), `${t.id}.md`)
-  writeFileSync(path, before)
+// Open text in $EDITOR. Returns the new text, or undefined if unchanged.
+function editText(name: string, text: string) {
+  const path = join(tmpdir(), name)
+  writeFileSync(path, text)
   const editor = process.env.VISUAL || process.env.EDITOR || 'vi'
   const r = Bun.spawnSync(['sh', '-c', `${editor} "$1"`, 'sh', path], { stdio: ['inherit', 'inherit', 'inherit'] })
   if (r.exitCode !== 0) die('editor failed')
   const after = readFileSync(path, 'utf8')
-  if (after === before) return console.log('no change')
+  return after === text ? undefined : after
+}
+
+// `# Name` + markdown context
+async function editProject(key: string) {
+  const p = await api('GET', `/projects/${key}`)
+  const after = editText(`${p.key}.md`, `# ${p.name}\n\n${p.description ?? ''}\n`)
+  if (after === undefined) return console.log('no change')
+  const { title, body } = parseMd(after)
+  const patch: Record<string, string> = {}
+  if (title && title !== p.name) patch.name = title
+  if (body !== (p.description ?? '').trim()) patch.description = body
+  if (!Object.keys(patch).length) return console.log('no change')
+  await api('PATCH', `/projects/${p.key}`, patch)
+  console.log(`saved ${Object.keys(patch).join(', ')}`)
+}
+
+async function editInEditor(id: string) {
+  const t = await api('GET', `/tickets/${id}`)
+  const after = editText(`${t.id}.md`, ticketMd({ ...t, children: [] }))
+  if (after === undefined) return console.log('no change')
 
   const { fm, title, body } = parseMd(after)
   const patch: Record<string, unknown> = {}

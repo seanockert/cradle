@@ -1,10 +1,10 @@
-// Read-only HTML view: /t (open tickets), /t/:id, /t/:id.md (export). Token login, cookie session.
+// Read-only HTML view: /t (open tickets), /t/p/:key (project), /t/:id, /t/:id.md (export). Token login, cookie session.
 import { Hono, type MiddlewareHandler } from 'hono'
 import { html, raw } from 'hono/html'
 import { getCookie, setCookie } from 'hono/cookie'
 import { Marked } from 'marked'
 import * as core from './core'
-import { exportMd, exportName } from './format'
+import { exportMd, exportName, summary } from './format'
 import { derive, same } from './secret'
 
 type App = { Bindings: Env }
@@ -37,7 +37,7 @@ const auth: MiddlewareHandler<App> = async (c, next) => {
 const CSS = `body{font:15px/1.55 system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;color:#222}
 a{color:#0b62d6;text-decoration:none}a:hover{text-decoration:underline}
 h2{margin-top:2rem;font-size:1.1rem}ul{padding-left:1.2rem}li{margin:.2rem 0}
-.s{display:inline-block;min-width:4.5rem;font-size:.8rem;color:#666}.id{font-family:ui-monospace,monospace;font-size:.85rem}.l{font-size:.8rem;color:#888}
+.s{display:inline-block;min-width:4.5rem;font-size:.8rem;color:#666}.id{font-family:ui-monospace,monospace;font-size:.85rem}.l{font-size:.8rem;color:#888}.ctx{margin:-.5rem 0 .5rem;color:#666;font-size:.9rem}
 table{border-collapse:collapse;font-size:.9rem;margin:1rem 0}td{padding:.15rem 1rem .15rem 0;vertical-align:top}td:first-child{color:#666}
 pre,code{font-family:ui-monospace,monospace;font-size:.85rem}pre{background:#f4f4f4;padding:.7rem;overflow-x:auto}
 .body{border-top:1px solid #ddd;margin-top:1rem}.note{font-size:.9rem}.note span{color:#666;margin-right:.5rem}
@@ -68,7 +68,7 @@ web.onError((err, c) => {
 })
 
 // Redirect to /t paths only
-const safeNext = (n?: string) => (n && /^\/t(\/[\w-]*)?$/.test(n) ? n : '/t')
+const safeNext = (n?: string) => (n && /^\/t(\/[\w.-]+)*$/.test(n) ? n : '/t')
 
 const loginPage = (next: string, error = '') =>
   page(
@@ -106,7 +106,9 @@ web.get('/', async (c) => {
   const qs = (a: boolean) => new URLSearchParams({ ...(a && { all: '1' }), ...(label && { label }) }).toString()
   const groups = projects.map((p: Row) => {
     const rows = tickets.filter((t: Row) => t.id.startsWith(`${p.key}-`))
-    return rows.length ? html`<h2>${p.key} · ${p.name}</h2><ul>${rows.map(item)}</ul>` : ''
+    return rows.length
+      ? html`<h2><a href="/t/p/${p.key}">${p.key} · ${p.name}</a></h2>${p.description ? html`<p class="ctx">${summary(p.description)}</p>` : ''}<ul>${rows.map(item)}</ul>`
+      : ''
   })
   return c.html(
     page(
@@ -116,6 +118,22 @@ web.get('/', async (c) => {
       }${
         tickets.length ? groups : html`<p>No tickets.</p>`
       }`,
+    ),
+  )
+})
+
+web.get('/p/:key', async (c) => {
+  const [p, tickets] = await Promise.all([
+    core.getProject(c.env.DB, c.req.param('key')),
+    core.listTickets(c.env.DB, { project: c.req.param('key'), limit: 500 }),
+  ])
+  return c.html(
+    page(
+      `${p.key} ${p.name}`,
+      html`<a href="/t">← all</a>
+<h1>${p.key} · ${p.name}</h1>
+${p.description ? html`<div class="body">${raw(await md.parse(p.description))}</div>` : html`<p>No context yet.</p>`}
+<h2>Open tickets</h2>${tickets.length ? html`<ul>${tickets.map(item)}</ul>` : html`<p>None.</p>`}`,
     ),
   )
 })

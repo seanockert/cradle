@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { slugify } from '../src/core'
-import { arr, exportMd, exportName, line, parseMd, str, ticketMd, toStatus } from '../src/format'
+import { TEMPLATE, arr, exportMd, exportName, line, missing, parseMd, projectMd, str, summary, ticketMd, toStatus } from '../src/format'
 import { ticketId } from '../src/github'
 
 test('ticketId: branch, Linear-style branch, title fallback', () => {
@@ -60,4 +60,17 @@ test('line shows labels as tags', () => {
   expect(line({ id: 'ABC-1', status: 'todo', title: 'T', labels: ['bug', 'repo:shop'], assignee: 'sean' })).toBe(
     'ABC-1 [todo] T #bug #repo:shop @sean',
   )
+})
+
+test('project summary and markdown', () => {
+  expect(summary('## Goal\n\nShip it fast.\n\n## More')).toBe('Ship it fast.')
+  expect(summary('## Only heading')).toBe('Only heading')
+  expect(summary('x'.repeat(120))).toHaveLength(100)
+  expect(projectMd({ key: 'ABC', name: 'Shop', tickets: { done: 2, todo: 1 } })).toBe('# ABC Shop\ntickets: 1 todo, 2 done\n\nNo context yet.\n')
+})
+
+test('missing body sections', () => {
+  expect(missing(TEMPLATE)).toEqual([])
+  expect(missing('## goal\nx\n## Done when\n- [ ] y')).toEqual(['Verify'])
+  expect(missing(undefined)).toEqual(['Goal', 'Done when', 'Verify'])
 })

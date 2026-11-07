@@ -52,9 +52,27 @@ cradle edit WEB-1 -l feature   # replaces the list; -l '' clears
 
 Web view: `/t?label=bug`.
 
+## Writing tickets
+
+Each ticket body has `## Goal`, `## Done when` (testable `- [ ]` items) and `## Verify` (commands or steps). Agents get this rule over MCP and tick the items before they open a PR. Missing sections give a warning, not an error.
+
+```sh
+cradle new "Add CSV export" -e       # opens the template in $EDITOR
+```
+
+## Project context
+
+Each project has a goal and context (markdown). Agents read it before they work on its tickets, so the work stays aligned.
+
+```sh
+cradle project new WEB "Website" -f goal.md
+cradle project WEB                   # goal, context, ticket counts
+cradle project edit WEB -e           # edit in $EDITOR
+```
+
 ## Web view
 
-`https://cradle.<you>.workers.dev/t` lists open tickets. `/t/WEB-1` shows one. Log in once with your token.
+`https://cradle.<you>.workers.dev/t` lists open tickets. `/t/p/WEB` shows a project's context. `/t/WEB-1` shows one ticket. Log in once with your token.
 
 ## Export
 

@@ -19,10 +19,41 @@ export function line(t: Row) {
 
 export const lines = (rows: Row[]) => (rows.length ? rows.map(line).join('\n') : 'no tickets')
 
+// First non-heading line of markdown, max 100 chars
+export function summary(md?: string) {
+  const all = md?.split('\n').map((x) => x.trim()).filter(Boolean) ?? []
+  const l = (all.find((x) => !x.startsWith('#')) ?? all[0] ?? '').replace(/^[#\-*>\s]+/, '')
+  return l.length > 100 ? `${l.slice(0, 99)}…` : l
+}
+
 export const projectLines = (rows: Row[]) =>
   rows.length
-    ? rows.map((p) => `${p.key} ${p.name} (${p.open} open)${p.description ? ` - ${p.description}` : ''}`).join('\n')
+    ? rows.map((p) => `${p.key} ${p.name} (${p.open} open)${p.description ? ` - ${summary(p.description)}` : ''}`).join('\n')
     : 'no projects'
+
+const ORDER = ['backlog', 'todo', 'doing', 'done', 'cancelled']
+
+// One project: name, ticket counts, full context
+export function projectMd(p: Row) {
+  const counts = ORDER.filter((s) => p.tickets?.[s]).map((s) => `${p.tickets[s]} ${s}`)
+  return `# ${p.key} ${p.name}\ntickets: ${counts.join(', ') || 'none'}\n\n${p.description?.trim() || 'No context yet.'}\n`
+}
+
+// Ticket body standard: another agent can do and verify the work with no other context
+export const SECTIONS = ['Goal', 'Done when', 'Verify']
+export const TEMPLATE = `## Goal
+
+Why this matters. Link it to the project goal.
+
+## Done when
+
+- [ ] A result you can test
+
+## Verify
+
+- A command or step that proves each item
+`
+export const missing = (body = '') => SECTIONS.filter((h) => !new RegExp(`^## ${h}\\b`, 'im').test(body))
 
 const minute = (ts: string) => ts.slice(0, 16)
 

@@ -40,10 +40,15 @@ const Label = z
   .regex(/^[a-z0-9][\w.:/-]{0,59}$/, 'label: a-z 0-9 . _ : / -, max 60 chars')
 const Labels = z.array(Label).max(10)
 
-export const ProjectInput = z.object({
+// Exact-text replacements, like str_replace
+const Edits = z.array(z.object({ old: z.string().min(1), new: z.string() }))
+
+// Create, or update given fields. description: markdown goal and context.
+const ProjectInput = z.object({
   key: Key,
-  name: z.string().min(1),
+  name: z.string().min(1).optional(),
   description: z.string().optional(),
+  edits: Edits.optional(),
 })
 
 export const ListInput = z.object({
@@ -81,7 +86,7 @@ const UpdateInput = z.object({
   pr: z.string().nullish(),
   branch: z.string().min(1).optional(),
   body: z.string().optional(),
-  edits: z.array(z.object({ old: z.string().min(1), new: z.string() })).optional(),
+  edits: Edits.optional(),
   blocked_by: z.array(Id).optional(),
   labels: Labels.optional(),
   note: z.string().min(1).optional(),
@@ -100,12 +105,33 @@ export async function listProjects(db: D1Database) {
   return results.map(compact)
 }
 
-export async function createProject(db: D1Database, input: unknown) {
+// Full context + ticket counts by status
+export async function getProject(db: D1Database, rawKey: string) {
+  const key = Key.parse(rawKey)
+  const [p, counts] = await db.batch<Record<string, unknown>>([
+    db.prepare('SELECT key, name, description FROM projects WHERE key = ?').bind(key),
+    db.prepare('SELECT status, count(*) AS n FROM tickets WHERE project = ? GROUP BY status').bind(key),
+  ])
+  const row = p.results[0] as { key: string; name: string; description: string | null } | undefined
+  if (!row) throw new HttpError(404, `project ${key} not found`)
+  return compact({ ...row, tickets: Object.fromEntries(counts.results.map((r) => [r.status, r.n])) })
+}
+
+export async function saveProject(db: D1Database, input: unknown) {
   const p = ProjectInput.parse(input)
-  await db
-    .prepare('INSERT INTO projects (key, name, description) VALUES (?, ?, ?)')
-    .bind(p.key, p.name, p.description ?? null)
-    .run()
+  let description = p.description
+  if (p.edits) {
+    const cur = await db.prepare('SELECT description FROM projects WHERE key = ?').bind(p.key).first<{ description: string | null }>()
+    if (!cur) throw new HttpError(404, `project ${p.key} not found`)
+    description = applyEdits(description ?? cur.description ?? '', p.edits)
+  }
+  const upd = await db
+    .prepare('UPDATE projects SET name = COALESCE(?, name), description = COALESCE(?, description) WHERE key = ? RETURNING key')
+    .bind(p.name ?? null, description ?? null, p.key)
+    .first()
+  if (upd) return p.key
+  if (!p.name) throw new HttpError(404, `project ${p.key} not found. Give a name to create it`)
+  await db.prepare('INSERT INTO projects (key, name, description) VALUES (?, ?, ?)').bind(p.key, p.name, description ?? null).run()
   return p.key
 }
 
@@ -262,7 +288,7 @@ const depStmt = (db: D1Database, from: string, ref: string, b: string) =>
 const noteStmt = (db: D1Database, from: string, ref: string, text: string) =>
   db.prepare(`INSERT INTO notes (ticket, text) ${from}`).bind(text, ref)
 
-// Each `old` must match exactly once, like str_replace
+// Each `old` must match exactly once
 function applyEdits(body: string, edits: { old: string; new: string }[]) {
   for (const e of edits) {
     const n = body.split(e.old).length - 1

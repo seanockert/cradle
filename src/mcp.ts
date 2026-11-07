@@ -3,18 +3,29 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import { z } from 'zod'
 import * as core from './core'
-import { lines, projectLines, ticketMd } from './format'
+import { lines, missing, projectLines, projectMd, ticketMd } from './format'
 
 const instructions = (origin: string) => `Cradle is a ticket tracker. IDs look like ABC-123. Each ticket has a git branch.
-To work on a ticket: get it, check it against the latest main, fix stale facts (save with edits), check out its branch (create it if missing), save status doing. After opening a PR, save pr=<url>. Merging the PR sets status done if the repo has the cradle webhook; else set it yourself.
-Use edits, not a full body, to change part of a body. Use note for progress and decisions.
-When you create a ticket, add one type label (bug, feature, improvement, chore) and repo:<git repo name>.
+Each project (the ABC in ABC-123) has a goal and context: ## Goal, ## Constraints, ## Not in scope. Read it (project key=ABC) once before you work on its tickets. Keep the work aligned with it. If the goal changes, update it.
+Write each ticket so another agent can do and verify the work with no other context:
+- Title: imperative, one outcome.
+- Body: ## Goal (why, 1-3 sentences, linked to the project goal). ## Done when (- [ ] list, each item testable). ## Verify (commands or steps that prove each item). Add ## Context (files, links, limits) only if needed.
+- Short sentences, one instruction each, no filler (ASD-STE100 style).
+- One type label (bug, feature, improvement, chore) and repo:<git repo name>.
+To work on a ticket: get it, check it against the latest main, fix stale facts (save with edits), check out its branch (create it if missing), save status doing. Use note for progress and decisions.
+Before you open a PR: run Verify and tick each Done when item (save with edits). If an item fails, fix it or add a note. Do not skip it. After opening a PR, save pr=<url>. Merging the PR sets status done if the repo has the cradle webhook; else set it yourself.
+Use edits, not a full body, to change part of a body.
 Ticket page for PR bodies: ${origin}/t/<id>`
 
 const Status = z.enum(core.STATUSES)
 const Id = z.string()
 
 // core validates; this schema only guides the agent, so keep it short
+const Edits = z
+  .array(z.object({ old: z.string(), new: z.string() }))
+  .optional()
+  .describe('replace exact text, each old must match once')
+
 const SaveItem = z.object({
   id: Id.optional().describe('ABC-123. Omit to create'),
   project: z.string().optional().describe('key, needed to create'),
@@ -25,10 +36,7 @@ const SaveItem = z.object({
   blocked_by: z.array(Id).optional().describe('replaces the list'),
   labels: z.array(z.string()).optional().describe('replaces the list'),
   body: z.string().optional().describe('markdown, replaces body'),
-  edits: z
-    .array(z.object({ old: z.string(), new: z.string() }))
-    .optional()
-    .describe('replace exact text in body, each old must match once'),
+  edits: Edits,
   pr: z.string().nullable().optional(),
   branch: z.string().optional(),
   note: z.string().optional().describe('append to log'),
@@ -92,16 +100,33 @@ function server(db: D1Database, origin: string) {
         'Create or update tickets in one call. Without id: create. With id: change only given fields, null clears. Returns ids.',
       inputSchema: { items: z.array(SaveItem).min(1) },
     },
-    run(async (a) => (await core.saveTickets(db, a.items)).join(' ')),
+    run(async (a) => {
+      const ids = await core.saveTickets(db, a.items)
+      // Warn, do not block: new tickets should follow the body standard
+      const warn = ids
+        .map((id, i) => !a.items[i].id && missing(a.items[i].body).length && `${id} missing ${missing(a.items[i].body).map((h) => `## ${h}`).join(', ')}`)
+        .filter(Boolean)
+      return [ids.join(' '), ...warn].join('\n') + (warn.length ? '\nAdd them with edits.' : '')
+    }),
   )
 
   s.registerTool(
     'project',
     {
-      description: 'List projects. With key and name: create one. Key is the ticket prefix, 2-5 letters.',
-      inputSchema: { key: z.string().optional(), name: z.string().optional(), description: z.string().optional() },
+      description:
+        'No args: list projects. key only: get its goal and context. key + other fields: create (needs name) or update. Key is the ticket prefix.',
+      inputSchema: {
+        key: z.string().optional(),
+        name: z.string().optional(),
+        description: z.string().optional().describe('markdown goal and context, replaces it'),
+        edits: Edits,
+      },
     },
-    run(async (a) => (a.key ? await core.createProject(db, a) : projectLines(await core.listProjects(db)))),
+    run(async ({ key, ...rest }) => {
+      if (!key) return projectLines(await core.listProjects(db))
+      if (Object.values(rest).every((v) => v === undefined)) return projectMd(await core.getProject(db, key)).trimEnd()
+      return core.saveProject(db, { key, ...rest })
+    }),
   )
 
   return s

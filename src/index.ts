@@ -23,7 +23,14 @@ api.use(bearerAuth({ verifyToken: (token, c) => same(token, (c.env as Env).TOKEN
 
 api.get('/projects', async (c) => c.json(await core.listProjects(c.env.DB)))
 
-api.post('/projects', async (c) => c.json({ key: await core.createProject(c.env.DB, await c.req.json()) }, 201))
+api.get('/projects/:key', async (c) => c.json(await core.getProject(c.env.DB, c.req.param('key'))))
+
+// Create, or update given fields
+api.post('/projects', async (c) => c.json({ key: await core.saveProject(c.env.DB, await c.req.json()) }))
+
+api.patch('/projects/:key', async (c) =>
+  c.json({ key: await core.saveProject(c.env.DB, { ...(await c.req.json()), key: c.req.param('key') }) }),
+)
 
 // ?project=ABC&status=todo,doing&assignee=sean&parent=ABC-1&label=bug&q=text&all=1&limit=50
 api.get('/tickets', async (c) => {

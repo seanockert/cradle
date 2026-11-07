@@ -35,13 +35,14 @@ REST and MCP call the same `core` functions. They cannot drift.
 ## Data (D1)
 
 ```sql
-projects(key PK, name, description, seq)                -- key: 2-5 uppercase letters, e.g. ABC
+projects(key PK, name, description, seq)         -- key: 2-5 uppercase letters, e.g. ABC. description: markdown goal + context
 tickets(id PK, project, num, title, status, assignee, branch, parent, pr,
         body, labels, created, updated)          -- id: ABC-123
 deps(ticket, blocked_by)
 notes(id, ticket, ts, text)                      -- append-only
 ```
 
+- Project context: `description` holds the goal and context as markdown. Lists show its first non-heading line; getting one project shows all of it plus ticket counts. Save creates (needs name) or updates; `edits` change part of it.
 - Ticket numbers are per project. One D1 batch (a transaction) bumps `projects.seq`, inserts the ticket, its deps and note. A failure rolls back all of it, so numbers never skip or repeat.
 - Status: `backlog | todo | doing | done | cancelled`.
 - Branch: `abc-123-<title-slug>`, slug max 40 chars, cut at a word. You can override it.
@@ -59,21 +60,33 @@ notes(id, ticket, ts, text)                      -- append-only
 
 ## MCP (done)
 
-`src/mcp.ts`. Stateless Streamable HTTP, JSON responses, new server per request, no Durable Objects. Auth: key in URL (`/mcp/<key>`, derived from TOKEN, MCP only) or bearer TOKEN on `/mcp`. Fails with 403, not 401, so clients do not start OAuth. `cradle mcp add` sets up Claude Code; `cradle mcp` prints the URL + config. Tool definitions total about 2.8 KB (about 700 tokens).
+`src/mcp.ts`. Stateless Streamable HTTP, JSON responses, new server per request, no Durable Objects. Auth: key in URL (`/mcp/<key>`, derived from TOKEN, MCP only) or bearer TOKEN on `/mcp`. Fails with 403, not 401, so clients do not start OAuth. `cradle mcp add` sets up Claude Code; `cradle mcp` prints the URL + config. Tool definitions total about 3 KB (about 750 tokens).
 
 | Tool | Does | Returns |
 |---|---|---|
 | `list` | Filter by project, status, assignee, label or text. Done is hidden by default. | `ABC-123 [todo] Fix auth redirect #bug @sean` per line |
 | `get` | One ticket. `notes:true` adds the log. | Markdown + frontmatter: status, assignee, branch, pr, parent, blocked_by |
 | `save` | Create or update. Takes an array. Edits body with `edits: [{old,new}]`. `note` appends to the log. | IDs only |
-| `project` | List or create projects. | Compact lines |
+| `project` | No args: list. `key`: goal, context, ticket counts. `key` + fields: create or update, `edits` for part of the context. | Lines, markdown, or key |
 
 Rules: tool descriptions under 30 words. Lists never include body. Default limit 50; a cut-off list ends with a `(more: ...)` line. Timestamps to the minute.
 
-Server `instructions` (sent once when the agent connects):
+Server `instructions` (sent once when the agent connects, about 900 bytes). Full text in `src/mcp.ts`. They cover:
 
-> To work on a ticket: get it, check it against the latest main, fix stale facts (save with edits), check out its branch (create it if missing), save status doing. After opening a PR, save pr=<url>. Merging the PR sets status done if the repo has the cradle webhook; else set it yourself.
-> When you create a ticket, add one type label (bug, feature, improvement, chore) and repo:<git repo name>.
+- Read the project goal and context before work. Keep tickets aligned with it.
+- Ticket writing standard (below). Labels: one type + `repo:<name>`.
+- Work flow: get, check against main, branch, status doing, notes.
+- Before a PR: run Verify, tick each Done when item. Then save `pr`.
+
+## Ticket writing standard
+
+Opinionated, so any agent can pick up a ticket and check its own work with no other context.
+
+- Title: imperative, one outcome.
+- Body: `## Goal` (why, 1-3 sentences, linked to the project goal), `## Done when` (`- [ ]` items, each testable), `## Verify` (commands or steps that prove each item). `## Context` only if needed.
+- Short sentences, one instruction each, no filler (ASD-STE100 style).
+- Project context: `## Goal`, `## Constraints`, `## Not in scope`.
+- Not enforced. A create without the three sections still saves, but MCP `save` and `cradle new` warn with the missing ones. `cradle new -e` opens the template (`TEMPLATE` in `src/format.ts`).
 
 ## CLI (`cradle`) (done)
 
@@ -82,7 +95,7 @@ Bun script, linked with `bun link`. Run `cradle --help` for usage.
 ```
 cradle ls [-p ABC] [-s todo,doing] [-a name] [-l label] [-q text] [--parent ID] [--all]
 cradle show ID [-n]
-cradle new "Title" [-p ABC] [-s status] [-a name] [-l bug,repo:x] [-b body | -f file|-] [--parent ID] [--blocked-by ID,ID]
+cradle new "Title" [-p ABC] [-s status] [-a name] [-l bug,repo:x] [-b body | -f file|- | -e] [--parent ID] [--blocked-by ID,ID]
 cradle edit ID [-t title] [-s status] [-a name] [-l labels] [--pr url] [--parent ID] [--blocked-by ID,ID] [-b body | -f file|-]
 cradle edit ID -e             # $EDITOR, saves changed fields only
 cradle mv ID [ID...] STATUS
@@ -92,7 +105,9 @@ cradle branch ID
 cradle import FILE|- [-p ABC] [-s status] [--split]
 cradle export ID [ID...] [-o DIR|FILE.md|-]
 cradle export -p ABC [--all] [-o DIR]
-cradle project [new KEY "Name" [description]]
+cradle project [KEY]          # list, or one project's goal + context
+cradle project new KEY "Name" [-b context | -f file|-]
+cradle project edit KEY [-t name] [-b context | -f file|-] [-e]
 cradle mcp [add]              # MCP URL + config, or add to Claude Code
 cradle gh hook [owner/repo]   # PR opened -> doing, merged -> done
 cradle config URL TOKEN       # writes ~/.config/cradle/config.json (or use CRADLE_URL, CRADLE_TOKEN)
