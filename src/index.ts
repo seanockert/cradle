@@ -76,7 +76,7 @@ const mcpAuth: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
     ? want && (await same(key, await mcpKey(want)))
     : await same(c.req.header('authorization')?.match(/^Bearer (.+)$/i)?.[1], want)
   if (ok) return next()
-  const message = 'cradle: bad or missing key. Run `cradle mcp` to get the URL.'
+  const message = `cradle: bad or missing key. Get the MCP URL at ${new URL(c.req.url).origin}/t/connect`
   return c.json({ jsonrpc: '2.0', id: null, error: { code: -32001, message } }, 403)
 }
 

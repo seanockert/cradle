@@ -1,0 +1,1 @@
+TOKEN=dev # Secret for the CLI, MCP and web view. In production use: openssl rand -hex 32

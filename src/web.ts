@@ -1,11 +1,11 @@
-// Read-only HTML view: /t (open tickets), /t/p/:key (project), /t/:id, /t/:id.md (export). Token login, cookie session.
+// Read-only HTML view: /t (open tickets), /t/p/:key (project), /t/:id, /t/:id.md (export), /t/connect (setup for agents and CLI). Token login, cookie session.
 import { Hono, type MiddlewareHandler } from 'hono'
 import { html, raw } from 'hono/html'
 import { getCookie, setCookie } from 'hono/cookie'
 import { Marked } from 'marked'
 import * as core from './core'
 import { exportMd, exportName, summary } from './format'
-import { derive, same } from './secret'
+import { derive, mcpKey, same } from './secret'
 
 type App = { Bindings: Env }
 
@@ -62,10 +62,11 @@ pre,code{font-family:ui-monospace,monospace;font-size:.85em}
 pre{background:var(--soft);padding:.75rem 1rem;border-radius:6px;overflow-x:auto}
 section>h2{margin:0}.note{font-size:.9rem}.note time{color:var(--muted);font-family:ui-monospace,monospace;font-size:.8rem;margin-right:.75rem}
 input[type=password]{width:100%;padding:.5rem .6rem;font:inherit;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:inherit}
-button{font:inherit;padding:.4rem 1rem;border:0;border-radius:6px;background:var(--fg);color:var(--bg);cursor:pointer}`
+button{font:inherit;padding:.4rem 1rem;border:0;border-radius:6px;background:var(--fg);color:var(--bg);cursor:pointer}
+.copy{position:relative}.copy pre{margin:0;padding-right:4.5rem}.copy button{position:absolute;top:.4rem;right:.4rem;font-size:.75rem;padding:.2rem .6rem}`
 
 const nav = (links: unknown = '') =>
-  html`<nav class="inline-between"><a class="brand" href="/t">cradle</a><span class="inline">${links}</span></nav>`
+  html`<nav class="inline-between"><a class="brand" href="/t">cradle</a><span class="inline">${links}<a href="/t/connect">connect</a></span></nav>`
 
 const page = (title: string, body: unknown) =>
   html`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -142,6 +143,35 @@ web.get('/', async (c) => {
       html`${nav(html`${label ? html`<span class="muted">#${label}</span><a href="/t${all ? '?all=1' : ''}">all labels</a>` : ''}<a href="/t?${qs(!all)}">${all ? 'hide' : 'show'} done</a>`)}${
         tickets.length ? groups : html`<p>No tickets.</p>`
       }`,
+    ),
+  )
+})
+
+// Code block with a copy button
+const copyBlock = (text: string) => html`<div class="copy"><pre><code>${text}</code></pre><button type="button">copy</button></div>`
+
+const COPY_JS = `document.querySelectorAll('.copy button').forEach((b) => b.onclick = async () => {
+  await navigator.clipboard.writeText(b.previousElementSibling.textContent); b.textContent = 'copied'; setTimeout(() => b.textContent = 'copy', 1500)
+})`
+
+web.get('/connect', async (c) => {
+  const origin = new URL(c.req.url).origin
+  const mcpUrl = `${origin}/mcp/${await mcpKey(c.env.TOKEN)}`
+  const config = JSON.stringify({ mcpServers: { cradle: { type: 'http', url: mcpUrl } } }, null, 2)
+  return c.html(
+    page(
+      'cradle connect',
+      html`${nav()}
+<header class="stack-half"><h1>Connect</h1><p class="ctx">This URL gives full access to your tickets over MCP. Share it only with people you trust.</p></header>
+<section class="stack-half"><h2>Claude Code</h2><p class="ctx">Run in a terminal. Then restart Claude Code sessions.</p>
+${copyBlock(`claude mcp add --scope user --transport http cradle ${mcpUrl}`)}</section>
+<section class="stack-half"><h2>Claude Desktop and claude.ai</h2><p class="ctx">Settings, Connectors, Add custom connector. Use this URL.</p>
+${copyBlock(mcpUrl)}</section>
+<section class="stack-half"><h2>Other agents</h2><p class="ctx">MCP config, HTTP transport.</p>
+${copyBlock(config)}</section>
+<section class="stack-half"><h2>CLI</h2><p class="ctx">Needs <a href="https://bun.sh">Bun</a>. The login command asks for your token.</p>
+${copyBlock(`bun install -g github:seanockert/cradle\ncradle login ${origin}`)}</section>
+<script>${raw(COPY_JS)}</script>`,
     ),
   )
 })

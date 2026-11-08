@@ -111,7 +111,7 @@ cradle project new KEY "Name" [-r repo,repo] [-b context | -f file|-]
 cradle project edit KEY [-t name] [-r repo,repo] [-b context | -f file|-] [-e]
 cradle mcp [add]              # MCP URL + config, or add to Claude Code
 cradle gh hook [owner/repo]   # PR opened -> doing, merged -> done
-cradle config URL TOKEN       # writes ~/.config/cradle/config.json (or use CRADLE_URL, CRADLE_TOKEN)
+cradle login [URL] [TOKEN]    # checks and writes ~/.config/cradle/config.json (or use CRADLE_URL, CRADLE_TOKEN)
 --json                        # compact JSON
 ```
 

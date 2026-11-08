@@ -24,7 +24,7 @@ const HELP = `cradle - tickets for agents
   cradle project KEY|.                 goal, context, repos, ticket counts. . = this git repo's project
   cradle project new KEY "Name" [-r repo,repo] [-b context | -f file|-]
   cradle project edit KEY [-t name] [-r repo,repo] [-b context | -f file|-] [-e]
-  cradle config URL TOKEN
+  cradle login [URL] [TOKEN]           asks for what is missing, checks it, saves it
   cradle mcp [add]                     print MCP URL + config. add: set up Claude Code
   cradle gh hook [owner/repo]          add webhook: PR opened -> doing, merged -> done
 
@@ -80,7 +80,7 @@ function config() {
   const file = existsSync(CONFIG) ? JSON.parse(readFileSync(CONFIG, 'utf8')) : {}
   const url = process.env.CRADLE_URL ?? file.url
   const token = process.env.CRADLE_TOKEN ?? file.token
-  if (!url || !token) die('not configured. run: cradle config URL TOKEN')
+  if (!url || !token) die('not configured. run: cradle login URL')
   return (cfg = { url: url.replace(/\/$/, ''), token })
 }
 
@@ -352,13 +352,35 @@ const cmds: Record<string, () => Promise<void>> = {
     console.log(`${existing ? 'updated' : 'added'} webhook on ${repo}`)
   },
 
-  async config() {
-    const [, url, token] = args
-    if (!url || !token) die('usage: cradle config URL TOKEN')
+  async login() {
+    const url = (args[1] ?? ask('URL (https://cradle.<you>.workers.dev):')).trim().replace(/\/$/, '')
+    const token = (args[2] ?? ask('Token:', true)).trim()
+    if (!url || !token) die('usage: cradle login URL [TOKEN]')
+    const res = await fetch(`${url}/api/projects`, { headers: { authorization: `Bearer ${token}` } }).catch((e: Error) =>
+      die(`cannot reach ${url}: ${e.message}`),
+    )
+    if (res.status === 401) die('wrong token')
+    if (!res.ok) die(`${url} is not a cradle server (HTTP ${res.status})`)
     mkdirSync(dirname(CONFIG), { recursive: true })
     writeFileSync(CONFIG, JSON.stringify({ url, token }), { mode: 0o600 })
-    console.log(`saved ${CONFIG}`)
+    console.log(`saved ${CONFIG}\nNext, to connect Claude Code: cradle mcp add`)
   },
+}
+
+cmds.config = cmds.login
+
+// Read one line from the terminal. hidden: no echo.
+function ask(question: string, hidden = false) {
+  const stty = (mode: string) => hidden && Bun.spawnSync(['stty', mode], { stdin: 'inherit' })
+  stty('-echo')
+  try {
+    return prompt(question) ?? ''
+  } finally {
+    if (hidden) {
+      stty('echo')
+      console.log()
+    }
+  }
 }
 
 // Open text in $EDITOR. Returns the new text, or undefined if unchanged.
