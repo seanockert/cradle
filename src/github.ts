@@ -4,11 +4,12 @@ import { hex, same, webhookSecret } from './secret'
 
 // abc-123-slug or user/abc-123-slug (Linear style)
 const BRANCH = /(?:^|\/)([a-z]{2,5})-(\d+)(?:-|$)/i
-const TITLE = /\b([a-z]{2,5})-(\d+)\b/i
+// ABC-12: x, ABC-12 x, or [ABC-12] anywhere. Not ids inside free text, like UTF-8.
+const TITLE = /^\s*([a-z]{2,5})-(\d+)(?=[:\s]|$)|\[([a-z]{2,5})-(\d+)\]/i
 
 export function ticketId(branch: string, title = '') {
   const m = branch.match(BRANCH) ?? title.match(TITLE)
-  return m ? `${m[1].toUpperCase()}-${m[2]}` : null
+  return m ? `${(m[1] ?? m[3]).toUpperCase()}-${m[2] ?? m[4]}` : null
 }
 
 async function validSignature(body: string, header: string | null, token: string) {

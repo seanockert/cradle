@@ -11,6 +11,16 @@ test('ticketId: branch, Linear-style branch, title fallback', () => {
   expect(ticketId('main', 'no id')).toBeNull()
 })
 
+test('ticketId: title fallback only at the start or in brackets', () => {
+  expect(ticketId('main', 'ABC-12: x')).toBe('ABC-12')
+  expect(ticketId('main', 'ABC-12 x')).toBe('ABC-12')
+  expect(ticketId('main', 'ABC-12')).toBe('ABC-12')
+  expect(ticketId('main', 'Fix auth [abc-12]')).toBe('ABC-12')
+  expect(ticketId('main', 'Fix UTF-8 parsing')).toBeNull()
+  expect(ticketId('main', 'ABC-12x thing')).toBeNull()
+  expect(ticketId('abc-7-fix', '[ABC-12] x')).toBe('ABC-7')
+})
+
 test('slugify cuts at a word boundary', () => {
   expect(slugify('  Fix: the Auth!! ')).toBe('fix-the-auth')
   expect(slugify('a'.repeat(39) + ' b')).toBe('a'.repeat(39))
