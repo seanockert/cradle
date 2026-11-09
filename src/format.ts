@@ -181,5 +181,9 @@ export function parseMd(src: string) {
     title = h1[1].trim()
     rest = rest.slice(h1[0].length)
   }
-  return { fm, title, body: rest.trim() }
+  // notesMd writes `## Notes` as the last section. Read it back as notes, not body.
+  const n = rest.match(/(?:^|\n)## Notes[ \t]*\r?\n((?:(?!\n## )[\s\S])*)$/)
+  const notes = n?.[1].trim() || undefined
+  if (n) rest = rest.slice(0, n.index)
+  return { fm, title, body: rest.trim(), notes }
 }

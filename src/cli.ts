@@ -225,7 +225,7 @@ const cmds: Record<string, () => Promise<void>> = {
 
   async import() {
     const file = need(args[1], 'cradle import FILE|- [-p ABC] [--split]')
-    const { fm, title, body } = parseMd(await readInput(file))
+    const { fm, title, body, notes } = parseMd(await readInput(file))
     const project = (await defaultProject()).toUpperCase()
     // Cradle keys, else Backlog.md keys. A file from another project or tracker keeps no id links.
     const foreign = !!fm.id && !str(fm.id)!.toUpperCase().startsWith(`${project}-`)
@@ -247,7 +247,7 @@ const cmds: Record<string, () => Promise<void>> = {
     const t = title ?? (file === '-' ? die('no title. add a # heading') : basename(file).replace(/\.md$/i, ''))
 
     if (!o.split) {
-      const r = await api('POST', '/tickets', { ...base, title: t, body })
+      const r = await api('POST', '/tickets', { ...base, title: t, body, note: notes })
       return out(r, () => r.ids[0])
     }
 
@@ -256,7 +256,7 @@ const cmds: Record<string, () => Promise<void>> = {
     if (!sections.length) die('no ## sections to split')
     const {
       ids: [pid],
-    } = await api('POST', '/tickets', { ...base, title: t, body: intro.trim() })
+    } = await api('POST', '/tickets', { ...base, title: t, body: intro.trim(), note: notes })
     const kids = sections.map((s) => {
       const [head, ...rest] = s.split('\n')
       return {

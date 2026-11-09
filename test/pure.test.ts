@@ -51,6 +51,15 @@ test('exportMd -> parseMd round trip, YAML quoting', () => {
   expect(exportName(t)).toBe('abc-1 - Fix-auth-2.md')
 })
 
+test('exportMd -> parseMd keeps notes out of the body', () => {
+  const t = { id: 'ABC-1', title: 'T', status: 'todo', body: 'Body\n\n## Part', notes: [{ ts: '2026-11-07 01:00:00', text: 'one' }, { ts: '2026-11-07 02:00:00', text: 'two\nlines' }] }
+  const { body, notes } = parseMd(exportMd(t))
+  expect(body).toBe('Body\n\n## Part')
+  expect(notes).toBe('- 2026-11-07 01:00 one\n- 2026-11-07 02:00 two\n  lines')
+  expect(parseMd(exportMd({ ...t, notes: [] })).notes).toBeUndefined()
+  expect(parseMd('# T\n\n## Notes\n\nx\n\n## After').body).toBe('## Notes\n\nx\n\n## After')
+})
+
 test('parseMd reads Backlog.md files', () => {
   const src = `---\nid: BACK-200\ntitle: Add thing\nstatus: To Do\nassignee: []\ncreated_date: '2025-07-23'\nlabels:\n  - enhancement\ndependencies: [task-24.1, BACK-208]\n---\n\n## Description\n\nText`
   const { fm, title, body } = parseMd(src)
