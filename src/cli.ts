@@ -108,6 +108,12 @@ function currentRepo() {
   return top.ok ? repoName(top.out) : undefined
 }
 
+// Adds repo:<this git repo> if there is no repo: label
+function withRepo(labels: string[]) {
+  const repo = !labels.some((l) => l.startsWith('repo:')) && currentRepo()
+  return repo ? [...labels, `repo:${repo}`] : labels
+}
+
 const projectForRepo = (repo: string) => api('GET', `/repos/${encodeURIComponent(repo)}`)
 
 // -p, then CRADLE_PROJECT, then the project that owns this git repo
@@ -166,7 +172,7 @@ const cmds: Record<string, () => Promise<void>> = {
       assignee: o.assignee,
       parent: o.parent,
       blocked_by: arr(o['blocked-by']),
-      labels: arr(o.labels),
+      labels: withRepo(arr(o.labels)),
       body,
     })
     const gaps = missing(body)
@@ -241,7 +247,7 @@ const cmds: Record<string, () => Promise<void>> = {
       assignee: arr(fm.assignee)[0]?.replace(/^@/, ''),
       parent: o.parent ?? ids(fm.parent ?? fm.parent_task_id)[0],
       blocked_by: ids(fm.blocked_by ?? fm.dependencies),
-      labels: [...arr(fm.labels), ...arr(o.labels)],
+      labels: withRepo([...arr(fm.labels), ...arr(o.labels)]),
       pr: str(fm.pr),
     }
     const t = title ?? (file === '-' ? die('no title. add a # heading') : basename(file).replace(/\.md$/i, ''))
