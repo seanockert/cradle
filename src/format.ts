@@ -129,6 +129,27 @@ export function exportMd(t: Row) {
   return md
 }
 
+// Prompt to paste into an agent chat. Ticket as XML-style tags, like Linear "copy as prompt".
+export function promptMd(t: Row, p?: Row) {
+  const project = p && `<project key="${p.key}" name="${p.name}">${p.description ? summary(p.description) : ''}</project>`
+  const ticket = [
+    `<ticket id="${t.id}">`,
+    `<title>${t.title}</title>`,
+    `<status>${t.status}</status>`,
+    ...(t.labels ?? []).map((l: string) => `<label>${l}</label>`),
+    project,
+    t.body && `<description>\n${t.body.trim()}\n</description>`,
+    t.parent && `<parent id="${t.parent}"/>`,
+    ...(t.blocked_by ?? []).map((b: string) => `<blocked-by id="${b}"/>`),
+    t.children?.length &&
+      `<sub-tickets>\n${t.children.map((c: Row) => `<ticket-ref id="${c.id}" status="${c.status}">${c.title}</ticket-ref>`).join('\n')}\n</sub-tickets>`,
+    '</ticket>',
+  ]
+  return [`Work on cradle ticket ${t.id}:`, t.branch && `Branch: ${t.branch}`, ticket.filter(Boolean).join('\n')]
+    .filter(Boolean)
+    .join('\n\n')
+}
+
 // Backlog.md style: "abc-1 - Fix-auth-redirect.md"
 export const exportName = (t: Row) =>
   `${t.id.toLowerCase()} - ${t.title.replace(/[\\/:*?"<>|#\s]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)}.md`

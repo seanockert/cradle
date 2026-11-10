@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { slugify } from '../src/core'
-import { TEMPLATE, arr, exportMd, exportName, line, missing, parseMd, projectMd, repoName, str, summary, ticketMd, toStatus } from '../src/format'
+import { TEMPLATE, arr, exportMd, exportName, line, missing, parseMd, projectMd, promptMd, repoName, str, summary, ticketMd, toStatus } from '../src/format'
 import { ticketId } from '../src/github'
 
 test('ticketId: branch, Linear-style branch, title fallback', () => {
@@ -49,6 +49,37 @@ test('exportMd -> parseMd round trip, YAML quoting', () => {
   expect(fm).toMatchObject({ labels: ['bug', 'repo:shop'], dependencies: ['ABC-2'], parent_task_id: 'ABC-0', pr: 'https://x/1', updated_date: '2026-11-07 01:00' })
   expect(toStatus(fm.status as string)).toBe('doing')
   expect(exportName(t)).toBe('abc-1 - Fix-auth-2.md')
+})
+
+test('promptMd: all fields, and only required fields', () => {
+  const t = {
+    id: 'ABC-2', title: 'Fix auth', status: 'todo', labels: ['bug', 'repo:shop'], branch: 'abc-2-fix-auth', body: '## Goal\n\nWork.\n',
+    parent: 'ABC-1', blocked_by: ['ABC-3'], children: [{ id: 'ABC-4', status: 'done', title: 'Child' }],
+  }
+  expect(promptMd(t, { key: 'ABC', name: 'Shop', description: '## Goal\n\nSell things.' })).toBe(`Work on cradle ticket ABC-2:
+
+Branch: abc-2-fix-auth
+
+<ticket id="ABC-2">
+<title>Fix auth</title>
+<status>todo</status>
+<label>bug</label>
+<label>repo:shop</label>
+<project key="ABC" name="Shop">Sell things.</project>
+<description>
+## Goal
+
+Work.
+</description>
+<parent id="ABC-1"/>
+<blocked-by id="ABC-3"/>
+<sub-tickets>
+<ticket-ref id="ABC-4" status="done">Child</ticket-ref>
+</sub-tickets>
+</ticket>`)
+  expect(promptMd({ id: 'ABC-5', title: 'T', status: 'backlog', blocked_by: [], children: [] })).toBe(
+    'Work on cradle ticket ABC-5:\n\n<ticket id="ABC-5">\n<title>T</title>\n<status>backlog</status>\n</ticket>',
+  )
 })
 
 test('exportMd -> parseMd keeps notes out of the body', () => {

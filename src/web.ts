@@ -4,7 +4,7 @@ import { html, raw } from 'hono/html'
 import { getCookie, setCookie } from 'hono/cookie'
 import { Marked } from 'marked'
 import * as core from './core'
-import { exportMd, exportName, summary } from './format'
+import { exportMd, exportName, promptMd, summary } from './format'
 import { derive, mcpKey, same } from './secret'
 
 type App = { Bindings: Env }
@@ -68,15 +68,23 @@ section>h2{margin:0}
 .notes{display:grid;gap:.5rem;font-size:.9rem}.notes li{display:grid;grid-template-columns:max-content 1fr;gap:.75rem;align-items:baseline}.notes time{color:var(--muted);font-family:ui-monospace,monospace;font-size:.8rem}
 input[type=password]{width:100%;padding:.5rem .6rem;font:inherit;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:inherit}
 button{font:inherit;padding:.4rem 1rem;border:0;border-radius:6px;background:var(--fg);color:var(--bg);cursor:pointer}
+.link{padding:0;background:none;color:var(--link)}.link:hover{text-decoration:underline}
+.branch{font-family:ui-monospace,monospace;font-size:.85em;padding:.3rem;line-height:1;border-radius:4px;background:var(--soft);color:inherit;text-align:left;overflow-wrap:anywhere}.branch:hover{background:var(--line)}
 .copy{display:flex;align-items:flex-start;gap:.5rem;padding-right:.5rem;background:var(--soft);border-radius:6px}.copy.one{align-items:center}
 .copy pre{flex:1;min-width:0;margin:0}.copy button{flex:none;margin-top:.5rem;font-size:.75rem;padding:.2rem .6rem}.copy.one button{margin:0}`
 
 const nav = (links: unknown = '') =>
-  html`<nav class="inline-between"><a class="brand" href="/t">cradle</a><span class="inline">${links}<a href="/t/connect">connect</a></span></nav>`
+  html`<nav class="inline-between"><a class="brand" href="/t">cradle</a><span class="inline">${links}</span></nav>`
+
+// Any [data-copy] button copies its value and shows "copied" for a short time
+const COPY_JS = `document.querySelectorAll('[data-copy]').forEach((b) => b.onclick = async () => {
+  await navigator.clipboard.writeText(b.dataset.copy); const t = (b.dataset.label ??= b.textContent)
+  b.style.minWidth = b.offsetWidth + 'px'; b.textContent = 'copied'; setTimeout(() => b.textContent = t, 1500)
+})`
 
 const page = (title: string, body: unknown) =>
   html`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title}</title><style>${raw(CSS)}</style></head><body class="stack-2x">${body}</body></html>`
+<title>${title}</title><style>${raw(CSS)}</style></head><body class="stack-2x">${body}<script>${raw(COPY_JS)}</script></body></html>`
 
 type Row = Record<string, any>
 
@@ -157,11 +165,7 @@ web.get('/', async (c) => {
 })
 
 // Code block with a copy button
-const copyBlock = (text: string) => html`<div class="copy${text.includes('\n') ? '' : ' one'}"><pre><code>${text}</code></pre><button type="button">copy</button></div>`
-
-const COPY_JS = `document.querySelectorAll('.copy button').forEach((b) => b.onclick = async () => {
-  await navigator.clipboard.writeText(b.previousElementSibling.textContent); b.textContent = 'copied'; setTimeout(() => b.textContent = 'copy', 1500)
-})`
+const copyBlock = (text: string) => html`<div class="copy${text.includes('\n') ? '' : ' one'}"><pre><code>${text}</code></pre><button type="button" data-copy="${text}">copy</button></div>`
 
 web.get('/connect', async (c) => {
   const origin = new URL(c.req.url).origin
@@ -179,8 +183,7 @@ ${copyBlock(mcpUrl)}</section>
 <section class="stack-half"><h2>Other agents</h2><p class="ctx">MCP config, HTTP transport.</p>
 ${copyBlock(config)}</section>
 <section class="stack-half"><h2>CLI</h2><p class="ctx">Needs <a href="https://bun.sh">Bun</a>. The login command asks for your token.</p>
-${copyBlock(`bun install -g github:seanockert/cradle\ncradle login ${origin}`)}</section>
-<script>${raw(COPY_JS)}</script>`,
+${copyBlock(`bun install -g github:seanockert/cradle\ncradle login ${origin}`)}</section>`,
     ),
   )
 })
@@ -208,12 +211,13 @@ web.get('/:file{[A-Za-z]{2,5}-\\d+\\.md}', async (c) => {
 })
 
 web.get('/:id', async (c) => {
-  const t: Row = await core.getTicket(c.env.DB, c.req.param('id'), { notes: true })
+  const id = c.req.param('id')
+  const [t, p]: Row[] = await Promise.all([core.getTicket(c.env.DB, id, { notes: true }), core.getProject(c.env.DB, id.split('-')[0])])
   const rows: [string, unknown][] = [
     ['status', html`<span class="pill st-${t.status}">${t.status}</span>`],
     ['labels', t.labels?.length && labelLinks(t.labels)],
     ['assignee', t.assignee],
-    ['branch', t.branch && html`<code>${t.branch}</code>`],
+    ['branch', t.branch && html`<button type="button" class="branch" data-copy="${t.branch}" title="Copy branch name">${t.branch}</button>`],
     ['pr', t.pr && html`<a href="${/^https?:/.test(t.pr) ? t.pr : '#'}">${t.pr}</a>`],
     ['parent', t.parent && idLink(t.parent)],
     ['blocked by', t.blocked_by?.length && t.blocked_by.map((b: string) => html`${idLink(b)} `)],
@@ -222,7 +226,7 @@ web.get('/:id', async (c) => {
   return c.html(
     page(
       `${t.id} ${t.title}`,
-      html`${nav(html`<a href="/t/${t.id}.md">export .md</a>`)}
+      html`${nav(html`<button type="button" class="link" data-copy="${promptMd(t, p)}">copy prompt</button><a href="/t/${t.id}.md">export .md</a>`)}
 <header class="stack-half"><span class="id">${t.id}</span><h1>${t.title}</h1></header>
 <dl class="meta">${rows.filter(([, v]) => v).map(([k, v]) => html`<dt>${k}</dt><dd>${v}</dd>`)}</dl>
 ${t.body ? html`<div class="body">${raw(await md.parse(t.body))}</div>` : ''}
