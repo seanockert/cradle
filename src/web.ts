@@ -52,18 +52,24 @@ h3{font-size:.95rem;margin:1.5rem 0 .4rem}
 .muted,.l{color:var(--muted)}.l{font-size:.8rem}.ctx{color:var(--muted);font-size:.9rem;margin:0 0 .5rem}
 .id{font-family:ui-monospace,monospace;font-size:.8rem;color:var(--muted)}
 .pill{display:inline-block;min-width:4.5rem;text-align:center;font-size:.75rem;padding:.05rem .5rem;border-radius:99px;color:var(--muted);background:color-mix(in srgb,currentColor 12%,transparent)}
-.st-doing{color:#2563eb}.st-done{color:#16a34a}.st-cancelled{text-decoration:line-through}
-.rows li{padding:.4rem 0;border-bottom:1px solid var(--line)}.rows li:last-child{border:0}
+.st-todo{color:var(--fg)}.st-backlog{background:none;box-shadow:inset 0 0 0 1px color-mix(in srgb,currentColor 35%,transparent)}.st-doing{color:#2563eb}.st-done{color:#16a34a}.st-cancelled{text-decoration:line-through}
+.rows{display:grid;grid-template-columns:5rem minmax(4rem,max-content) 1fr;gap:.5rem .75rem}
+.rows li{display:grid;grid-column:1/-1;grid-template-columns:subgrid;align-items:baseline}.rows .pill{width:100%}
+.rows .t{color:var(--fg)}.rows .closed .t{color:var(--muted)}
 .meta{display:grid;grid-template-columns:max-content 1fr;gap:.3rem 1.5rem;margin:0;font-size:.9rem}.meta dt{color:var(--muted)}.meta dd{margin:0}
 .body{border-top:1px solid var(--line)}.body>:first-child{margin-top:1.5rem}
-li:has(>input[type=checkbox]){list-style:none;margin-left:-1.3rem}li>input[type=checkbox]{margin:0 .5rem 0 0;vertical-align:-1px}
+li:has(>input[type=checkbox]){list-style:none;position:relative}
+li>input[type=checkbox]{appearance:none;position:absolute;left:-1.5rem;top:calc((1.6em - .875rem)/2);width:.875rem;height:.875rem;margin:0;border:1.5px solid var(--muted);border-radius:3px}
+li>input[type=checkbox]:checked{border-color:#16a34a;background:#16a34a url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='white' stroke-width='2.5'/%3E%3C/svg%3E") center/100% no-repeat}
 pre,code{font-family:ui-monospace,monospace;font-size:.85em}
-:not(pre)>code{background:var(--soft);padding:.1rem .3rem;border-radius:4px}
+:not(pre)>code{background:var(--soft);padding:.1rem .3rem;border-radius:4px;display:inline-block;max-width:100%;overflow-wrap:anywhere}
 pre{background:var(--soft);padding:.75rem 1rem;border-radius:6px;overflow-x:auto}
-section>h2{margin:0}.note{font-size:.9rem}.note time{color:var(--muted);font-family:ui-monospace,monospace;font-size:.8rem;margin-right:.75rem}
+section>h2{margin:0}
+.notes{display:grid;gap:.5rem;font-size:.9rem}.notes li{display:grid;grid-template-columns:max-content 1fr;gap:.75rem;align-items:baseline}.notes time{color:var(--muted);font-family:ui-monospace,monospace;font-size:.8rem}
 input[type=password]{width:100%;padding:.5rem .6rem;font:inherit;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:inherit}
 button{font:inherit;padding:.4rem 1rem;border:0;border-radius:6px;background:var(--fg);color:var(--bg);cursor:pointer}
-.copy{position:relative}.copy pre{margin:0;padding-right:4.5rem}.copy button{position:absolute;top:.4rem;right:.4rem;font-size:.75rem;padding:.2rem .6rem}`
+.copy{display:flex;align-items:flex-start;gap:.5rem;padding-right:.5rem;background:var(--soft);border-radius:6px}.copy.one{align-items:center}
+.copy pre{flex:1;min-width:0;margin:0}.copy button{flex:none;margin-top:.5rem;font-size:.75rem;padding:.2rem .6rem}.copy.one button{margin:0}`
 
 const nav = (links: unknown = '') =>
   html`<nav class="inline-between"><a class="brand" href="/t">cradle</a><span class="inline">${links}<a href="/t/connect">connect</a></span></nav>`
@@ -78,10 +84,13 @@ const idLink = (id: string) => html`<a class="id" href="/t/${id}">${id}</a>`
 
 const labelLinks = (labels?: string[]) => labels?.map((l) => html` <a class="l" href="/t?label=${encodeURIComponent(l)}">#${l}</a>`) ?? ''
 
+const closed = (status: string) => status === 'done' || status === 'cancelled'
+
+// Grid row: pill, id, title + labels. Columns line up across rows (see .rows).
 const item = (t: Row) =>
-  html`<li class="inline-half"><span class="pill st-${t.status}">${t.status}</span> ${idLink(t.id)} ${t.title}${labelLinks(t.labels)}${
+  html`<li${closed(t.status) ? html` class="closed"` : ''}><div class="pill st-${t.status}">${t.status}</div><div class="id">${t.id}</div><div><a class="t" href="/t/${t.id}">${t.title}</a>${labelLinks(t.labels)}${
     t.assignee ? html` <small class="muted">@${t.assignee}</small>` : ''
-  }</li>`
+  }</div></li>`
 
 const list = (rows: Row[]) => html`<ul class="rows">${rows.map(item)}</ul>`
 
@@ -148,7 +157,7 @@ web.get('/', async (c) => {
 })
 
 // Code block with a copy button
-const copyBlock = (text: string) => html`<div class="copy"><pre><code>${text}</code></pre><button type="button">copy</button></div>`
+const copyBlock = (text: string) => html`<div class="copy${text.includes('\n') ? '' : ' one'}"><pre><code>${text}</code></pre><button type="button">copy</button></div>`
 
 const COPY_JS = `document.querySelectorAll('.copy button').forEach((b) => b.onclick = async () => {
   await navigator.clipboard.writeText(b.previousElementSibling.textContent); b.textContent = 'copied'; setTimeout(() => b.textContent = 'copy', 1500)
@@ -220,7 +229,7 @@ ${t.body ? html`<div class="body">${raw(await md.parse(t.body))}</div>` : ''}
 ${t.children?.length ? html`<section class="stack-half"><h2>Sub-tickets</h2>${list(t.children)}</section>` : ''}
 ${
   t.notes?.length
-    ? html`<section class="stack-half"><h2>Notes</h2><ul class="rows">${t.notes.map((n: Row) => html`<li class="note"><time>${n.ts.slice(0, 16)}</time>${n.text}</li>`)}</ul></section>`
+    ? html`<section class="stack-half"><h2>Notes</h2><ul class="notes">${t.notes.map((n: Row) => html`<li><time>${n.ts.slice(0, 16)}</time><div>${n.text}</div></li>`)}</ul></section>`
     : ''
 }`,
     ),

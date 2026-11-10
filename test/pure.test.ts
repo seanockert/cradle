@@ -85,6 +85,7 @@ test('project summary and markdown', () => {
   expect(summary('## Goal\n\nShip it fast.\n\n## More')).toBe('Ship it fast.')
   expect(summary('## Only heading')).toBe('Only heading')
   expect(summary('x'.repeat(120))).toHaveLength(100)
+  expect(summary(`${'word '.repeat(19)}longword more`)).toBe(`${'word '.repeat(18)}word…`)
   expect(projectMd({ key: 'ABC', name: 'Shop', tickets: { done: 2, todo: 1 } })).toBe('# ABC Shop\ntickets: 1 todo, 2 done\n\nNo context yet.\n')
 })
 

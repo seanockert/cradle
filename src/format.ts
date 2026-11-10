@@ -23,7 +23,7 @@ export const lines = (rows: Row[]) => (rows.length ? rows.map(line).join('\n') :
 export function summary(md?: string) {
   const all = md?.split('\n').map((x) => x.trim()).filter(Boolean) ?? []
   const l = (all.find((x) => !x.startsWith('#')) ?? all[0] ?? '').replace(/^[#\-*>\s]+/, '')
-  return l.length > 100 ? `${l.slice(0, 99)}…` : l
+  return l.length > 100 ? `${l.slice(0, 100).replace(/\s+\S*$/, '').slice(0, 99)}…` : l
 }
 
 // Repo name from "cradle", "owner/cradle" or a git URL

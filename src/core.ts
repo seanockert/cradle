@@ -196,7 +196,7 @@ export async function listTickets(db: D1Database, input: ListOpts) {
         (SELECT group_concat(d.blocked_by) FROM deps d JOIN tickets b ON b.id = d.blocked_by
           WHERE d.ticket = t.id AND b.status NOT IN ${CLOSED}) AS blocked_by
       FROM tickets t ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-      ORDER BY t.project, t.num LIMIT ?`,
+      ORDER BY t.project, t.status IN ${CLOSED}, t.num LIMIT ?`,
     )
     .bind(...args, o.limit)
     .all()
@@ -208,7 +208,7 @@ export async function getTicket(db: D1Database, rawId: string, opts: { notes?: b
   const stmts = [
     db.prepare('SELECT * FROM tickets WHERE id = ?').bind(id),
     db.prepare('SELECT blocked_by FROM deps WHERE ticket = ?').bind(id),
-    db.prepare('SELECT id, status, title FROM tickets WHERE parent = ? ORDER BY num').bind(id),
+    db.prepare(`SELECT id, status, title FROM tickets WHERE parent = ? ORDER BY status IN ${CLOSED}, num`).bind(id),
   ]
   if (opts.notes) stmts.push(db.prepare('SELECT ts, text FROM notes WHERE ticket = ? ORDER BY id').bind(id))
   const [t, deps, kids, notes] = await db.batch<Record<string, unknown>>(stmts)
