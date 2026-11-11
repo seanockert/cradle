@@ -6,6 +6,7 @@ import { Marked } from 'marked'
 import * as core from './core'
 import { exportMd, exportName, promptMd, summary } from './format'
 import { derive, mcpKey, same } from './secret'
+import LOGO from './logo.svg'
 
 type App = { Bindings: Env }
 
@@ -45,7 +46,7 @@ body{font:15px/1.6 system-ui,sans-serif;max-width:720px;margin:0 auto;padding:1.
 .inline-half,.stack-half{--gap:.375rem}.stack-2x{--gap:1.5rem}.inline-between{justify-content:space-between}
 ul[class]{list-style:none;margin:0;padding:0}
 a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
-nav{padding-bottom:1rem;border-bottom:1px solid var(--line);font-size:.9rem}nav .brand{color:var(--fg);font-weight:600}
+nav{padding-bottom:1rem;border-bottom:1px solid var(--line);font-size:.9rem}nav .brand{--gap:.4rem;color:var(--fg);font-weight:600}nav .brand svg{width:1.5rem;height:1.5rem}
 h1{font-size:1.6rem;line-height:1.25;margin:0}
 h2{font-size:1.05rem;margin:2rem 0 .5rem}h2 a{color:inherit}
 h3{font-size:.95rem;margin:1.5rem 0 .4rem}
@@ -74,7 +75,7 @@ button{font:inherit;padding:.4rem 1rem;border:0;border-radius:6px;background:var
 .copy pre{flex:1;min-width:0;margin:0}.copy button{flex:none;margin-top:.5rem;font-size:.75rem;padding:.2rem .6rem}.copy.one button{margin:0}`
 
 const nav = (links: unknown = '') =>
-  html`<nav class="inline-between"><a class="brand" href="/t">cradle</a><span class="inline">${links}</span></nav>`
+  html`<nav class="inline-between"><a class="brand inline" href="/t">${raw(LOGO)}cradle</a><span class="inline">${links}</span></nav>`
 
 // Any [data-copy] button copies its value and shows "copied" for a short time
 const COPY_JS = `document.querySelectorAll('[data-copy]').forEach((b) => b.onclick = async () => {
@@ -85,6 +86,12 @@ const COPY_JS = `document.querySelectorAll('[data-copy]').forEach((b) => b.oncli
 const page = (title: string, body: unknown) =>
   html`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title><style>${raw(CSS)}</style></head><body class="stack-2x">${body}<script>${raw(COPY_JS)}</script></body></html>`
+
+// Index page: large logo in the center
+export const home = () =>
+  html`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>cradle</title><style>${raw(CSS)}
+body{min-height:100vh;margin:0;padding:1.25rem;justify-content:center;align-items:center;max-width:none}body svg{width:min(160px,35vw);height:auto}</style></head><body class="stack">${raw(LOGO)}</body></html>`
 
 type Row = Record<string, any>
 

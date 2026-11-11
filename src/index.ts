@@ -5,7 +5,7 @@ import * as core from './core'
 import { handleGithub } from './github'
 import { mcpKey, same } from './secret'
 import { handleMcp } from './mcp'
-import { web } from './web'
+import { home, web } from './web'
 
 const app = new Hono<{ Bindings: Env }>()
 
@@ -15,7 +15,7 @@ app.onError((err, c) => {
   return c.json({ error }, status)
 })
 
-app.get('/', (c) => c.text('cradle'))
+app.get('/', (c) => c.html(home()))
 
 const api = new Hono<{ Bindings: Env }>()
 

@@ -4,6 +4,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
   "observability": { "enabled": true },
+  "rules": [{ "type": "Text", "globs": ["**/*.svg"] }],
   "d1_databases": [
     {
       "binding": "DB",
