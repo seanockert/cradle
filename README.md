@@ -1,5 +1,8 @@
 # Cradle
 
+<img width="640" alt="list-dark" src="https://github.com/user-attachments/assets/94554ead-743b-4b93-9ce6-a7ab547debea" />
+
+
 Headless ticket tracker for AI agents. Hono + Cloudflare Workers + D1. See `PLAN.md`.
 
 - [Connect to a cradle server](#connect-to-a-cradle-server): you have a URL and a token.
@@ -138,3 +141,9 @@ bun test
 bun link                  # puts this checkout's `cradle` on PATH
 cradle login http://localhost:8787 dev
 ```
+
+## Screenshots
+
+<img width="640" alt="ticket" src="https://github.com/user-attachments/assets/3aa10796-a3ca-4851-9cd0-f3faed78f203" />
+<img width="640" alt="ticket-dark" src="https://github.com/user-attachments/assets/f98fa415-404e-462e-9540-a58d66715bae" />
+
