@@ -92,4 +92,11 @@ app.post('/gh', async (c) => {
   return c.text(text, status)
 })
 
-export default app
+export default {
+  fetch: app.fetch,
+  // Daily cron (wrangler.jsonc)
+  async scheduled(_ctrl, env) {
+    const ids = await core.purgeCancelled(env.DB)
+    if (ids.length) console.log(`purged cancelled: ${ids.join(', ')}`)
+  },
+} satisfies ExportedHandler<Env>

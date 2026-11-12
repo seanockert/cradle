@@ -1,11 +1,11 @@
 // Ticket operations. REST, MCP and webhook all call these.
 import { z } from 'zod'
-import { repoName } from './format'
+import { STATUSES, repoName } from './format'
 
-export const STATUSES = ['backlog', 'todo', 'doing', 'done', 'cancelled'] as const
+export { STATUSES }
 const CLOSED = `('done', 'cancelled')`
 
-export class HttpError extends Error {
+class HttpError extends Error {
   constructor(public status: 400 | 404 | 409, message: string) {
     super(message)
   }
@@ -28,7 +28,7 @@ const Key = z
   .string()
   .regex(/^[A-Za-z]{2,5}$/, 'project key must be 2-5 letters')
   .transform((s) => s.toUpperCase())
-export const Id = z
+const Id = z
   .string()
   .regex(/^[A-Za-z]{2,5}-\d+$/, 'ticket id must look like ABC-123')
   .transform((s) => s.toUpperCase())
@@ -42,7 +42,7 @@ const Label = z
 const Labels = z.array(Label).max(10)
 
 // Git repo name. Takes "cradle", "owner/cradle" or a git URL.
-export const Repo = z
+const Repo = z
   .string()
   .transform(repoName)
   .pipe(z.string().regex(/^[a-z0-9._-]{1,100}$/, 'repo: git repo name, e.g. cradle'))
@@ -50,7 +50,7 @@ export const Repo = z
 // Exact-text replacements, like str_replace
 const Edits = z.array(z.object({ old: z.string().min(1), new: z.string() }))
 
-// Create, or update given fields. description: markdown goal and context.
+// description: markdown goal and context
 const ProjectInput = z.object({
   key: Key,
   name: z.string().min(1).optional(),
@@ -59,7 +59,7 @@ const ProjectInput = z.object({
   repos: z.array(Repo).max(10).optional(),
 })
 
-export const ListInput = z.object({
+const ListInput = z.object({
   project: Key.optional(),
   status: z.array(Status).optional(),
   assignee: z.string().optional(),
@@ -189,14 +189,14 @@ export async function listTickets(db: D1Database, input: ListOpts) {
     where.push(`(t.title LIKE ? ESCAPE '\\' OR t.body LIKE ? ESCAPE '\\')`), args.push(like, like)
   }
 
-  // blocked_by lists only open blockers
+  // blocked_by lists only open blockers. Open tickets sort first, so a limit cuts closed ones.
   const { results } = await db
     .prepare(
       `SELECT t.id, t.status, t.title, t.labels, t.assignee, t.parent,
         (SELECT group_concat(d.blocked_by) FROM deps d JOIN tickets b ON b.id = d.blocked_by
           WHERE d.ticket = t.id AND b.status NOT IN ${CLOSED}) AS blocked_by
       FROM tickets t ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-      ORDER BY t.project, t.status IN ${CLOSED}, t.num LIMIT ?`,
+      ORDER BY t.status IN ${CLOSED}, t.project, t.num LIMIT ?`,
     )
     .bind(...args, o.limit)
     .all()
@@ -313,6 +313,19 @@ export async function linkPr(db: D1Database, id: string, url: string, merged: bo
   const [upd] = await db.batch<{ status: string }>(stmts)
   const status = upd.results[0]?.status
   return status ? `${id} ${status}` : `${id} not found, ignored`
+}
+
+// Delete cancelled tickets not updated for `days`, with their notes and deps. Sub-tickets lose the parent.
+export async function purgeCancelled(db: D1Database, days = 30) {
+  const age = `-${days} days`
+  const old = `SELECT id FROM tickets WHERE status = 'cancelled' AND updated < datetime('now', ?)`
+  const res = await db.batch<{ id: string }>([
+    db.prepare(`DELETE FROM notes WHERE ticket IN (${old})`).bind(age),
+    db.prepare(`DELETE FROM deps WHERE ticket IN (${old}) OR blocked_by IN (${old})`).bind(age, age),
+    db.prepare(`UPDATE tickets SET parent = NULL WHERE parent IN (${old})`).bind(age),
+    db.prepare(`DELETE FROM tickets WHERE id IN (${old}) RETURNING id`).bind(age),
+  ])
+  return res[3].results.map((r) => r.id)
 }
 
 // Ticket id as a SELECT: inserts join the batch and do nothing if the ticket is missing.

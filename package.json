@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
-    "db:local": "wrangler d1 migrations apply cradle --local",
-    "db:remote": "wrangler d1 migrations apply cradle --remote",
+    "db:local": "wrangler d1 migrations apply DB --local",
+    "db:remote": "wrangler d1 migrations apply DB --remote",
     "types": "wrangler types",
     "check": "tsc --noEmit && tsc --noEmit -p tsconfig.cli.json",
     "test": "bun test",

@@ -118,7 +118,7 @@ cradle project edit WEB -r website,website-api   # set its repos
 
 ### Web view
 
-`https://<server>/t` lists open tickets. `/t/p/WEB` shows a project's context. `/t/WEB-1` shows one ticket. `/t/connect` shows how to connect agents and the CLI. Log in once with your token (30-day cookie).
+`https://<server>/t` lists tickets by project and status. Done and cancelled start collapsed. `/t/p/WEB` shows a project's context. `/t/WEB-1` shows one ticket. `/t/connect` shows how to connect agents and the CLI. Log in once with your token (30-day cookie).
 
 ### Export
 

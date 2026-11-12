@@ -103,9 +103,10 @@ function server(db: D1Database, origin: string) {
     run(async (a) => {
       const ids = await core.saveTickets(db, a.items)
       // Warn, do not block: new tickets should follow the body standard
-      const warn = ids
-        .map((id, i) => !a.items[i].id && missing(a.items[i].body).length && `${id} missing ${missing(a.items[i].body).map((h) => `## ${h}`).join(', ')}`)
-        .filter(Boolean)
+      const warn = ids.flatMap((id, i) => {
+        const gaps = a.items[i].id ? [] : missing(a.items[i].body)
+        return gaps.length ? [`${id} missing ${gaps.map((h) => `## ${h}`).join(', ')}`] : []
+      })
       return [ids.join(' '), ...warn].join('\n') + (warn.length ? '\nAdd them with edits.' : '')
     }),
   )

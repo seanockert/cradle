@@ -4,6 +4,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
   "observability": { "enabled": true },
+  "triggers": { "crons": ["0 3 * * *"] },
   "rules": [{ "type": "Text", "globs": ["**/*.svg"] }],
   "d1_databases": [
     {

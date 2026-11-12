@@ -51,6 +51,7 @@ notes(id, ticket, ts, text)                      -- append-only
 - `parent` gives sub-tickets. `deps` gives blocked-by. The software shows both but does not apply rules to them.
 - Search: `LIKE` on title + body. Fast enough at personal scale. No FTS5.
 - Edits: last write wins (v1).
+- Cleanup: a daily cron (03:00 UTC) deletes cancelled tickets not updated for 30 days, with their notes and deps. Sub-tickets lose the parent. Done tickets stay. Numbers are not used again.
 
 ## Auth
 

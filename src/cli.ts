@@ -152,8 +152,11 @@ const cmds: Record<string, () => Promise<void>> = {
     add('label', o.labels)
     add('q', o.q)
     if (o.all) qs.set('all', '1')
+    // One extra row tells us the list is cut off
+    qs.set('limit', '101')
     const rows = await api('GET', `/tickets?${qs}`)
-    out(rows, () => lines(rows))
+    if (rows.length > 100) console.error('(more: narrow the filter)')
+    out(rows.slice(0, 100), () => lines(rows.slice(0, 100)))
   },
 
   async show() {

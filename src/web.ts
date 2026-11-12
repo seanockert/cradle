@@ -36,8 +36,8 @@ const auth: MiddlewareHandler<App> = async (c, next) => {
 }
 
 // Layout classes (stack, inline) from https://seanockert.com/css-layouts
-const CSS = `:root{--fg:#1c1c1c;--muted:#6e6e6e;--line:#e8e8e8;--soft:#f4f4f3;--bg:#fff;--link:#0b62d6;--doing:#2563eb;--done:#16a34a;color-scheme:light dark}
-@media(prefers-color-scheme:dark){:root{--fg:#e4e4e4;--muted:#949494;--line:#2c2c2c;--soft:#222;--bg:#141414;--link:#6aa8ff;--doing:#60a5fa;--done:#4ade80}}
+const CSS = `:root{--fg:#1c1c1c;--muted:#6e6e6e;--line:#e8e8e8;--soft:#f4f4f3;--bg:#fff;--link:#0b62d6;--backlog:#7c3aed;--todo:#d97706;--doing:#2563eb;--done:#16a34a;color-scheme:light dark}
+@media(prefers-color-scheme:dark){:root{--fg:#e4e4e4;--muted:#949494;--line:#2c2c2c;--soft:#222;--bg:#141414;--link:#6aa8ff;--backlog:#a78bfa;--todo:#fbbf24;--doing:#60a5fa;--done:#4ade80}}
 *{box-sizing:border-box}
 body{font:15px/1.6 system-ui,sans-serif;max-width:720px;margin:0 auto;padding:1.5rem 1.25rem 4rem;color:var(--fg);background:var(--bg)}
 [class^=inline],[class*=' inline'],[class^=stack],[class*=' stack']{--gap:.75rem;display:flex;gap:var(--gap)}
@@ -53,10 +53,14 @@ h3{font-size:.95rem;margin:1.5rem 0 .4rem}
 .muted,.l{color:var(--muted)}.l{font-size:.8rem}.ctx{color:var(--muted);font-size:.9rem;margin:0 0 .5rem}
 .id{font-family:ui-monospace,monospace;font-size:.8rem;color:var(--muted)}
 .pill{display:inline-block;min-width:4.5rem;text-align:center;font-size:.75rem;padding:.05rem .5rem;border-radius:99px;color:var(--muted);background:color-mix(in srgb,currentColor 12%,transparent)}
-.st-todo{color:var(--fg)}.st-backlog{background:none;box-shadow:inset 0 0 0 1px color-mix(in srgb,currentColor 35%,transparent)}.st-doing{color:var(--doing)}.st-done{color:var(--done)}.st-cancelled{text-decoration:line-through}
+.st-todo{color:var(--todo)}.st-backlog{color:var(--backlog);background:none;box-shadow:inset 0 0 0 1px color-mix(in srgb,currentColor 35%,transparent)}.st-doing{color:var(--doing)}.st-done{color:var(--done)}.st-cancelled{color:var(--muted);text-decoration:line-through}
 .rows{display:grid;grid-template-columns:5rem minmax(4rem,max-content) 1fr fit-content(40%);gap:.5rem .75rem}
 .rows li{display:grid;grid-column:1/-1;grid-template-columns:subgrid;align-items:baseline}.rows .pill{width:100%}
 .rows .t{color:var(--fg)}.rows .tags{text-align:right}.rows .closed .t{color:var(--muted)}
+@media(max-width:560px){.rows{display:flex;flex-direction:column;gap:1rem}
+.rows li{grid-template-columns:auto auto 1fr;grid-template-areas:'pill id tags' 'title title title';gap:.2rem .5rem;align-items:center}
+.rows .pill{grid-area:pill;width:auto;min-width:0}.rows .id{grid-area:id}.rows .tags{grid-area:tags}.rows .title{grid-area:title;line-height:1.4}
+.group .rows li{grid-template-columns:auto 1fr;grid-template-areas:'id tags' 'title title'}.group .rows .pill{display:none}}
 .meta{display:grid;grid-template-columns:max-content 1fr;gap:.3rem 1.5rem;margin:0;font-size:.9rem}.meta dt{color:var(--muted)}.meta dd{margin:0}
 .body{border-top:1px solid var(--line)}.body>:first-child{margin-top:1.5rem}
 li:has(>input[type=checkbox]){list-style:none;position:relative}
@@ -73,6 +77,7 @@ button{font:inherit;padding:.4rem 1rem;border:0;border-radius:6px;background:var
 .branch{font-family:ui-monospace,monospace;font-size:.85em;padding:.3rem;line-height:1;border-radius:4px;background:var(--soft);color:inherit;text-align:left;overflow-wrap:anywhere}.branch:hover{background:var(--line)}
 .copy{display:flex;align-items:flex-start;gap:.5rem;padding-right:.5rem;background:var(--soft);border-radius:6px}.copy.one{align-items:center}
 .group summary{display:flex;justify-content:space-between;align-items:center;list-style:none;cursor:pointer;font-size:.9rem;font-weight:600}
+.dot{display:inline-block;width:.6rem;height:.6rem;margin-right:.5rem;border-radius:50%;background:currentColor}.dot.st-backlog{background:none}
 .group summary::-webkit-details-marker{display:none}.group summary::after{content:'+';color:var(--muted);font-weight:400;font-size:1.1rem;line-height:1}
 .group[open]{padding-bottom:1.25rem}.group[open] summary{margin-bottom:.5rem}.group[open] summary::after{content:'−'}.group[open] .one{display:none}
 .copy pre{flex:1;min-width:0;margin:0}.copy button{flex:none;margin-top:.5rem;font-size:.75rem;padding:.2rem .6rem}.copy.one button{margin:0}`
@@ -80,13 +85,12 @@ button{font:inherit;padding:.4rem 1rem;border:0;border-radius:6px;background:var
 const nav = (links: unknown = '') =>
   html`<nav class="inline-between"><a class="brand inline" href="/t">${raw(LOGO)}cradle</a><span class="inline">${links}</span></nav>`
 
-// Any [data-copy] button copies its value and shows "copied" for a short time
+// [data-copy] buttons copy their value
 const COPY_JS = `document.querySelectorAll('[data-copy]').forEach((b) => b.onclick = async () => {
   await navigator.clipboard.writeText(b.dataset.copy); const t = (b.dataset.label ??= b.textContent)
   b.style.minWidth = b.offsetWidth + 'px'; b.textContent = 'copied'; setTimeout(() => b.textContent = t, 1500)
 })`
 
-// Shared head: color-scheme and theme-color follow the device preference
 const HEAD = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><meta name="theme-color" content="#fff" media="(prefers-color-scheme:light)">
 <meta name="theme-color" content="#141414" media="(prefers-color-scheme:dark)">`
@@ -95,7 +99,6 @@ const page = (title: string, body: unknown) =>
   html`${raw(HEAD)}
 <title>${title}</title><style>${raw(CSS)}</style></head><body class="stack-2x">${body}<script>${raw(COPY_JS)}</script></body></html>`
 
-// Index page: large logo in the center
 export const home = () =>
   html`${raw(HEAD)}
 <title>cradle</title><style>${raw(CSS)}
@@ -109,21 +112,21 @@ const labelLinks = (labels?: string[]) => labels?.map((l) => html` <a class="l" 
 
 const closed = (status: string) => status === 'done' || status === 'cancelled'
 
-// Grid row: pill, id, title, labels (right). Columns line up across rows (see .rows).
+// Row: pill, id, title, labels. Narrow screens put the title below. Groups hide the pill.
 const item = (t: Row) =>
-  html`<li${closed(t.status) ? html` class="closed"` : ''}><div class="pill st-${t.status}">${t.status}</div><div class="id">${t.id}</div><div><a class="t" href="/t/${t.id}">${t.title}</a></div><div class="tags">${labelLinks(t.labels)}${
+  html`<li${closed(t.status) ? html` class="closed"` : ''}><div class="pill st-${t.status}">${t.status}</div><div class="id">${t.id}</div><div class="title"><a class="t" href="/t/${t.id}">${t.title}</a></div><div class="tags">${labelLinks(t.labels)}${
     t.assignee ? html` <small class="muted">@${t.assignee}</small>` : ''
   }</div></li>`
 
 const list = (rows: Row[]) => html`<ul class="rows">${rows.map(item)}</ul>`
 
-// One collapsible group per status, in work order. Closed groups start collapsed.
+// One group per status, in work order. Closed groups start collapsed.
 const GROUP_ORDER = ['doing', 'todo', 'backlog', 'done', 'cancelled']
 const byStatus = (rows: Row[]) =>
   GROUP_ORDER.map((s) => {
     const g = rows.filter((t) => t.status === s)
     return g.length
-      ? html`<details class="group"${closed(s) ? '' : html` open`}><summary><span>${s[0].toUpperCase() + s.slice(1)} <span class="${g.length === 1 ? 'muted one' : 'muted'}">(${g.length})</span></span></summary>${list(g)}</details>`
+      ? html`<details class="group"${closed(s) ? '' : html` open`}><summary><span><span class="dot st-${s}"></span>${s[0].toUpperCase() + s.slice(1)} <span class="${g.length === 1 ? 'muted one' : 'muted'}">(${g.length})</span></span></summary>${list(g)}</details>`
       : ''
   })
 
@@ -187,7 +190,6 @@ web.get('/', async (c) => {
   )
 })
 
-// Code block with a copy button
 const copyBlock = (text: string) => html`<div class="copy${text.includes('\n') ? '' : ' one'}"><pre><code>${text}</code></pre><button type="button" data-copy="${text}">copy</button></div>`
 
 web.get('/connect', async (c) => {

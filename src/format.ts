@@ -39,17 +39,17 @@ export const projectLines = (rows: Row[]) =>
         .join('\n')
     : 'no projects'
 
-const ORDER = ['backlog', 'todo', 'doing', 'done', 'cancelled']
+export const STATUSES = ['backlog', 'todo', 'doing', 'done', 'cancelled'] as const
 
 // One project: name, ticket counts, full context
 export function projectMd(p: Row) {
-  const counts = ORDER.filter((s) => p.tickets?.[s]).map((s) => `${p.tickets[s]} ${s}`)
+  const counts = STATUSES.filter((s) => p.tickets?.[s]).map((s) => `${p.tickets[s]} ${s}`)
   const repos = p.repos?.length ? `repos: ${p.repos.join(', ')}\n` : ''
   return `# ${p.key} ${p.name}\n${repos}tickets: ${counts.join(', ') || 'none'}\n\n${p.description?.trim() || 'No context yet.'}\n`
 }
 
 // Ticket body standard: another agent can do and verify the work with no other context
-export const SECTIONS = ['Goal', 'Done when', 'Verify']
+const SECTIONS = ['Goal', 'Done when', 'Verify']
 export const TEMPLATE = `## Goal
 
 Why this matters. Link it to the project goal.
