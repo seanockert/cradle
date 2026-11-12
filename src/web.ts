@@ -54,9 +54,9 @@ h3{font-size:.95rem;margin:1.5rem 0 .4rem}
 .id{font-family:ui-monospace,monospace;font-size:.8rem;color:var(--muted)}
 .pill{display:inline-block;min-width:4.5rem;text-align:center;font-size:.75rem;padding:.05rem .5rem;border-radius:99px;color:var(--muted);background:color-mix(in srgb,currentColor 12%,transparent)}
 .st-todo{color:var(--fg)}.st-backlog{background:none;box-shadow:inset 0 0 0 1px color-mix(in srgb,currentColor 35%,transparent)}.st-doing{color:var(--doing)}.st-done{color:var(--done)}.st-cancelled{text-decoration:line-through}
-.rows{display:grid;grid-template-columns:5rem minmax(4rem,max-content) 1fr;gap:.5rem .75rem}
+.rows{display:grid;grid-template-columns:5rem minmax(4rem,max-content) 1fr fit-content(40%);gap:.5rem .75rem}
 .rows li{display:grid;grid-column:1/-1;grid-template-columns:subgrid;align-items:baseline}.rows .pill{width:100%}
-.rows .t{color:var(--fg)}.rows .closed .t{color:var(--muted)}
+.rows .t{color:var(--fg)}.rows .tags{text-align:right}.rows .closed .t{color:var(--muted)}
 .meta{display:grid;grid-template-columns:max-content 1fr;gap:.3rem 1.5rem;margin:0;font-size:.9rem}.meta dt{color:var(--muted)}.meta dd{margin:0}
 .body{border-top:1px solid var(--line)}.body>:first-child{margin-top:1.5rem}
 li:has(>input[type=checkbox]){list-style:none;position:relative}
@@ -72,6 +72,9 @@ button{font:inherit;padding:.4rem 1rem;border:0;border-radius:6px;background:var
 .link{padding:0;background:none;color:var(--link)}.link:hover{text-decoration:underline}
 .branch{font-family:ui-monospace,monospace;font-size:.85em;padding:.3rem;line-height:1;border-radius:4px;background:var(--soft);color:inherit;text-align:left;overflow-wrap:anywhere}.branch:hover{background:var(--line)}
 .copy{display:flex;align-items:flex-start;gap:.5rem;padding-right:.5rem;background:var(--soft);border-radius:6px}.copy.one{align-items:center}
+.group summary{display:flex;justify-content:space-between;align-items:center;list-style:none;cursor:pointer;font-size:.9rem;font-weight:600}
+.group summary::-webkit-details-marker{display:none}.group summary::after{content:'+';color:var(--muted);font-weight:400;font-size:1.1rem;line-height:1}
+.group[open]{padding-bottom:1.25rem}.group[open] summary{margin-bottom:.5rem}.group[open] summary::after{content:'−'}.group[open] .one{display:none}
 .copy pre{flex:1;min-width:0;margin:0}.copy button{flex:none;margin-top:.5rem;font-size:.75rem;padding:.2rem .6rem}.copy.one button{margin:0}`
 
 const nav = (links: unknown = '') =>
@@ -106,13 +109,23 @@ const labelLinks = (labels?: string[]) => labels?.map((l) => html` <a class="l" 
 
 const closed = (status: string) => status === 'done' || status === 'cancelled'
 
-// Grid row: pill, id, title + labels. Columns line up across rows (see .rows).
+// Grid row: pill, id, title, labels (right). Columns line up across rows (see .rows).
 const item = (t: Row) =>
-  html`<li${closed(t.status) ? html` class="closed"` : ''}><div class="pill st-${t.status}">${t.status}</div><div class="id">${t.id}</div><div><a class="t" href="/t/${t.id}">${t.title}</a>${labelLinks(t.labels)}${
+  html`<li${closed(t.status) ? html` class="closed"` : ''}><div class="pill st-${t.status}">${t.status}</div><div class="id">${t.id}</div><div><a class="t" href="/t/${t.id}">${t.title}</a></div><div class="tags">${labelLinks(t.labels)}${
     t.assignee ? html` <small class="muted">@${t.assignee}</small>` : ''
   }</div></li>`
 
 const list = (rows: Row[]) => html`<ul class="rows">${rows.map(item)}</ul>`
+
+// One collapsible group per status, in work order. Closed groups start collapsed.
+const GROUP_ORDER = ['doing', 'todo', 'backlog', 'done', 'cancelled']
+const byStatus = (rows: Row[]) =>
+  GROUP_ORDER.map((s) => {
+    const g = rows.filter((t) => t.status === s)
+    return g.length
+      ? html`<details class="group"${closed(s) ? '' : html` open`}><summary><span>${s[0].toUpperCase() + s.slice(1)} <span class="${g.length === 1 ? 'muted one' : 'muted'}">(${g.length})</span></span></summary>${list(g)}</details>`
+      : ''
+  })
 
 export const web = new Hono<App>()
 
@@ -153,23 +166,21 @@ web.post('/login', async (c) => {
 })
 
 web.get('/', async (c) => {
-  const all = c.req.query('all') === '1'
   const label = c.req.query('label') || undefined
   const [projects, tickets] = await Promise.all([
     core.listProjects(c.env.DB),
-    core.listTickets(c.env.DB, { all, label, limit: 500 }),
+    core.listTickets(c.env.DB, { all: true, label, limit: 500 }),
   ])
-  const qs = (a: boolean) => new URLSearchParams({ ...(a && { all: '1' }), ...(label && { label }) }).toString()
   const groups = projects.map((p: Row) => {
     const rows = tickets.filter((t: Row) => t.id.startsWith(`${p.key}-`))
     return rows.length
-      ? html`<section class="stack-half"><h2><a href="/t/p/${p.key}">${p.key} · ${p.name}</a></h2>${p.description ? html`<p class="ctx">${summary(p.description)}</p>` : ''}${list(rows)}</section>`
+      ? html`<section class="stack-half"><h2><a href="/t/p/${p.key}">${p.key} · ${p.name}</a></h2>${p.description ? html`<p class="ctx">${summary(p.description)}</p>` : ''}${byStatus(rows)}</section>`
       : ''
   })
   return c.html(
     page(
       'cradle',
-      html`${nav(html`${label ? html`<span class="muted">#${label}</span><a href="/t${all ? '?all=1' : ''}">all labels</a>` : ''}<a href="/t?${qs(!all)}">${all ? 'hide' : 'show'} done</a>`)}${
+      html`${nav(label ? html`<span class="muted">#${label}</span><a href="/t">all labels</a>` : '')}${
         tickets.length ? groups : html`<p>No tickets.</p>`
       }`,
     ),
@@ -203,7 +214,7 @@ ${copyBlock(`bun install -g github:seanockert/cradle\ncradle login ${origin}`)}<
 web.get('/p/:key', async (c) => {
   const [p, tickets] = await Promise.all([
     core.getProject(c.env.DB, c.req.param('key')),
-    core.listTickets(c.env.DB, { project: c.req.param('key'), limit: 500 }),
+    core.listTickets(c.env.DB, { project: c.req.param('key'), all: true, limit: 500 }),
   ])
   return c.html(
     page(
@@ -211,7 +222,7 @@ web.get('/p/:key', async (c) => {
       html`${nav()}
 <header class="stack-half"><span class="id">${p.key}</span><h1>${p.name}</h1>${p.repos?.length ? html`<p class="ctx">repos: ${p.repos.join(', ')}</p>` : ''}</header>
 ${p.description ? html`<div class="body">${raw(await md.parse(p.description))}</div>` : html`<p class="muted">No context yet.</p>`}
-<section class="stack-half"><h2>Open tickets</h2>${tickets.length ? list(tickets) : html`<p class="muted">None.</p>`}</section>`,
+<section class="stack-half"><h2>Tickets</h2>${tickets.length ? byStatus(tickets) : html`<p class="muted">None.</p>`}</section>`,
     ),
   )
 })
