@@ -36,8 +36,8 @@ const auth: MiddlewareHandler<App> = async (c, next) => {
 }
 
 // Layout classes (stack, inline) from https://seanockert.com/css-layouts
-const CSS = `:root{--fg:#1c1c1c;--muted:#6e6e6e;--line:#e8e8e8;--soft:#f4f4f3;--bg:#fff;--link:#0b62d6;color-scheme:light dark}
-@media(prefers-color-scheme:dark){:root{--fg:#e4e4e4;--muted:#949494;--line:#2c2c2c;--soft:#222;--bg:#141414;--link:#6aa8ff}}
+const CSS = `:root{--fg:#1c1c1c;--muted:#6e6e6e;--line:#e8e8e8;--soft:#f4f4f3;--bg:#fff;--link:#0b62d6;--doing:#2563eb;--done:#16a34a;color-scheme:light dark}
+@media(prefers-color-scheme:dark){:root{--fg:#e4e4e4;--muted:#949494;--line:#2c2c2c;--soft:#222;--bg:#141414;--link:#6aa8ff;--doing:#60a5fa;--done:#4ade80}}
 *{box-sizing:border-box}
 body{font:15px/1.6 system-ui,sans-serif;max-width:720px;margin:0 auto;padding:1.5rem 1.25rem 4rem;color:var(--fg);background:var(--bg)}
 [class^=inline],[class*=' inline'],[class^=stack],[class*=' stack']{--gap:.75rem;display:flex;gap:var(--gap)}
@@ -53,7 +53,7 @@ h3{font-size:.95rem;margin:1.5rem 0 .4rem}
 .muted,.l{color:var(--muted)}.l{font-size:.8rem}.ctx{color:var(--muted);font-size:.9rem;margin:0 0 .5rem}
 .id{font-family:ui-monospace,monospace;font-size:.8rem;color:var(--muted)}
 .pill{display:inline-block;min-width:4.5rem;text-align:center;font-size:.75rem;padding:.05rem .5rem;border-radius:99px;color:var(--muted);background:color-mix(in srgb,currentColor 12%,transparent)}
-.st-todo{color:var(--fg)}.st-backlog{background:none;box-shadow:inset 0 0 0 1px color-mix(in srgb,currentColor 35%,transparent)}.st-doing{color:#2563eb}.st-done{color:#16a34a}.st-cancelled{text-decoration:line-through}
+.st-todo{color:var(--fg)}.st-backlog{background:none;box-shadow:inset 0 0 0 1px color-mix(in srgb,currentColor 35%,transparent)}.st-doing{color:var(--doing)}.st-done{color:var(--done)}.st-cancelled{text-decoration:line-through}
 .rows{display:grid;grid-template-columns:5rem minmax(4rem,max-content) 1fr;gap:.5rem .75rem}
 .rows li{display:grid;grid-column:1/-1;grid-template-columns:subgrid;align-items:baseline}.rows .pill{width:100%}
 .rows .t{color:var(--fg)}.rows .closed .t{color:var(--muted)}
@@ -61,7 +61,7 @@ h3{font-size:.95rem;margin:1.5rem 0 .4rem}
 .body{border-top:1px solid var(--line)}.body>:first-child{margin-top:1.5rem}
 li:has(>input[type=checkbox]){list-style:none;position:relative}
 li>input[type=checkbox]{appearance:none;position:absolute;left:-1.5rem;top:calc((1.6em - .875rem)/2);width:.875rem;height:.875rem;margin:0;border:1.5px solid var(--muted);border-radius:3px}
-li>input[type=checkbox]:checked{border-color:#16a34a;background:#16a34a url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='white' stroke-width='2.5'/%3E%3C/svg%3E") center/100% no-repeat}
+li>input[type=checkbox]:checked{border-color:var(--done);background:var(--done) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='white' stroke-width='2.5'/%3E%3C/svg%3E") center/100% no-repeat}
 pre,code{font-family:ui-monospace,monospace;font-size:.85em}
 :not(pre)>code{background:var(--soft);padding:.1rem .3rem;border-radius:4px;display:inline-block;max-width:100%;overflow-wrap:anywhere}
 pre{background:var(--soft);padding:.75rem 1rem;border-radius:6px;overflow-x:auto}
@@ -83,13 +83,18 @@ const COPY_JS = `document.querySelectorAll('[data-copy]').forEach((b) => b.oncli
   b.style.minWidth = b.offsetWidth + 'px'; b.textContent = 'copied'; setTimeout(() => b.textContent = t, 1500)
 })`
 
+// Shared head: color-scheme and theme-color follow the device preference
+const HEAD = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="theme-color" content="#fff" media="(prefers-color-scheme:light)">
+<meta name="theme-color" content="#141414" media="(prefers-color-scheme:dark)">`
+
 const page = (title: string, body: unknown) =>
-  html`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  html`${raw(HEAD)}
 <title>${title}</title><style>${raw(CSS)}</style></head><body class="stack-2x">${body}<script>${raw(COPY_JS)}</script></body></html>`
 
 // Index page: large logo in the center
 export const home = () =>
-  html`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  html`${raw(HEAD)}
 <title>cradle</title><style>${raw(CSS)}
 body{min-height:100vh;margin:0;padding:1.25rem;justify-content:center;align-items:center;max-width:none}body svg{width:min(160px,35vw);height:auto}</style></head><body class="stack">${raw(LOGO)}</body></html>`
 
