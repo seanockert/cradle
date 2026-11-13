@@ -10,7 +10,7 @@ const HELP = `cradle - tickets for agents
 
   cradle ls [-p ABC] [-s todo,doing] [-a name] [-l label] [-q text] [--parent ID] [--all]
   cradle show ID [-n]                  -n adds notes
-  cradle new "Title" [-p ABC] [-s status] [-a name] [-l bug,repo:x] [-b body | -f file|- | -e] [--parent ID] [--blocked-by ID,ID]
+  cradle new "Title" [-p ABC] [-s status] [-a name] [-l bug] [-b body | -f file|- | -e] [--parent ID] [--blocked-by ID,ID]
   cradle edit ID [-t title] [-s status] [-a name] [-l labels] [--pr url] [--parent ID] [--blocked-by ID,ID] [-b body | -f file|-]
   cradle edit ID -e                    edit in $EDITOR
   cradle mv ID [ID...] STATUS          statuses: backlog todo doing done cancelled
@@ -30,7 +30,7 @@ const HELP = `cradle - tickets for agents
 
   --json   raw JSON output
   Ticket body: ## Goal, ## Done when (- [ ] testable items), ## Verify. new -e opens this template.
-  Labels: bug, feature, improvement, chore, repo:<name>. -l replaces the list; -l '' clears.
+  Labels: bug, feature, improvement, chore. -l replaces the list; -l '' clears.
   Project for new/import: -p, then CRADLE_PROJECT, then the project that owns this git repo (-r on project).`
 
 const CONFIG = join(homedir(), '.config', 'cradle', 'config.json')
@@ -108,12 +108,6 @@ function currentRepo() {
   return top.ok ? repoName(top.out) : undefined
 }
 
-// Adds repo:<this git repo> if there is no repo: label
-function withRepo(labels: string[]) {
-  const repo = !labels.some((l) => l.startsWith('repo:')) && currentRepo()
-  return repo ? [...labels, `repo:${repo}`] : labels
-}
-
 const projectForRepo = (repo: string) => api('GET', `/repos/${encodeURIComponent(repo)}`)
 
 // -p, then CRADLE_PROJECT, then the project that owns this git repo
@@ -175,7 +169,7 @@ const cmds: Record<string, () => Promise<void>> = {
       assignee: o.assignee,
       parent: o.parent,
       blocked_by: arr(o['blocked-by']),
-      labels: withRepo(arr(o.labels)),
+      labels: arr(o.labels),
       body,
     })
     const gaps = missing(body)
@@ -250,7 +244,7 @@ const cmds: Record<string, () => Promise<void>> = {
       assignee: arr(fm.assignee)[0]?.replace(/^@/, ''),
       parent: o.parent ?? ids(fm.parent ?? fm.parent_task_id)[0],
       blocked_by: ids(fm.blocked_by ?? fm.dependencies),
-      labels: withRepo([...arr(fm.labels), ...arr(o.labels)]),
+      labels: [...arr(fm.labels), ...arr(o.labels)],
       pr: str(fm.pr),
     }
     const t = title ?? (file === '-' ? die('no title. add a # heading') : basename(file).replace(/\.md$/i, ''))

@@ -11,7 +11,7 @@ Write each ticket so another agent can do and verify the work with no other cont
 - Title: imperative, one outcome.
 - Body: ## Goal (why, 1-3 sentences, linked to the project goal). ## Done when (- [ ] list, each item testable). ## Verify (commands or steps that prove each item). Add ## Context (files, links, limits) only if needed.
 - Short sentences, one instruction each, no filler (ASD-STE100 style).
-- One type label (bug, feature, improvement, chore) and repo:<git repo name>.
+- One type label: bug, feature, improvement or chore.
 To work on a ticket: get it, check it against the latest main, fix stale facts (save with edits), check out its branch (create it if missing), save status doing. Use note for progress and decisions.
 Before you open a PR: run Verify and tick each Done when item (save with edits). If an item fails, fix it or add a note. Do not skip it. After opening a PR, save pr=<url>. Merging the PR sets status done if the repo has the cradle webhook; else set it yourself.
 Use edits, not a full body, to change part of a body.

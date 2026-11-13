@@ -2,7 +2,7 @@
 
 type Row = Record<string, any>
 
-// ABC-3 [todo] Stripe webhook #bug #repo:shop @sean parent:ABC-2 blocked_by:ABC-1
+// ABC-3 [todo] Stripe webhook #bug @sean parent:ABC-2 blocked_by:ABC-1
 export function line(t: Row) {
   return [
     t.id,

@@ -1,4 +1,4 @@
-// GitHub webhook: link PRs to tickets by branch name. Opened -> doing, merged -> done. Adds repo:<name>.
+// GitHub webhook: link PRs to tickets by branch name. Opened -> doing, merged -> done.
 import * as core from './core'
 import { hex, same, webhookSecret } from './secret'
 
@@ -35,11 +35,11 @@ export async function handleGithub(req: Request, env: Env): Promise<[200 | 401, 
   if (event === 'ping') return [200, 'pong']
   if (event !== 'pull_request') return [200, `ignored ${event}`]
 
-  const { action, pull_request: pr, repository } = JSON.parse(body)
+  const { action, pull_request: pr } = JSON.parse(body)
   if (!['opened', 'reopened', 'closed'].includes(action)) return [200, `ignored ${action}`]
   if (action === 'closed' && !pr.merged) return [200, 'closed without merge, ignored']
 
   const id = ticketId(pr.head.ref, pr.title)
   if (!id) return [200, 'no ticket id in branch or title']
-  return [200, await core.linkPr(env.DB, id, pr.html_url, !!pr.merged, repository.name)]
+  return [200, await core.linkPr(env.DB, id, pr.html_url, !!pr.merged)]
 }

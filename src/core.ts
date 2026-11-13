@@ -33,7 +33,7 @@ const Id = z
   .regex(/^[A-Za-z]{2,5}-\d+$/, 'ticket id must look like ABC-123')
   .transform((s) => s.toUpperCase())
 
-// e.g. bug, feature, repo:cradle
+// e.g. bug, feature
 const Label = z
   .string()
   .trim()
@@ -296,18 +296,16 @@ async function updateTicket(db: D1Database, input: unknown) {
   return u.id
 }
 
-// From the GitHub webhook. Opened: link + move to doing. Merged: done. Both add the repo label.
-export async function linkPr(db: D1Database, id: string, url: string, merged: boolean, repo: string) {
-  const label = `repo:${repo.toLowerCase()}`
+// From the GitHub webhook. Opened: link + move to doing. Merged: done.
+export async function linkPr(db: D1Database, id: string, url: string, merged: boolean) {
   const stmts = [
     db
       .prepare(
         `UPDATE tickets SET pr = ?, updated = datetime('now'),
-          status = CASE WHEN ? THEN 'done' WHEN status IN ('backlog', 'todo') THEN 'doing' ELSE status END,
-          labels = CASE WHEN instr(',' || labels || ',', ?) THEN labels WHEN labels = '' THEN ? ELSE labels || ',' || ? END
+          status = CASE WHEN ? THEN 'done' WHEN status IN ('backlog', 'todo') THEN 'doing' ELSE status END
         WHERE id = ? RETURNING status`,
       )
-      .bind(url, merged ? 1 : 0, `,${label},`, label, label, id),
+      .bind(url, merged ? 1 : 0, id),
   ]
   if (merged) stmts.push(noteStmt(db, OLD, id, `merged ${url}`))
   const [upd] = await db.batch<{ status: string }>(stmts)

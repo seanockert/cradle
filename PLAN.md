@@ -47,7 +47,7 @@ notes(id, ticket, ts, text)                      -- append-only
 - Ticket numbers are per project. One D1 batch (a transaction) bumps `projects.seq`, inserts the ticket, its deps and note. A failure rolls back all of it, so numbers never skip or repeat.
 - Status: `backlog | todo | doing | done | cancelled`.
 - Branch: `abc-123-<title-slug>`, slug max 40 chars, cut at a word. You can override it.
-- Labels: one comma-joined column (`bug,repo:shop`), lowercase, max 10, each `[a-z0-9][\w.:/-]` up to 60 chars. Save replaces the list. Filter with `instr`, no index (personal scale). Usual set: `bug`, `feature`, `improvement`, `chore`, `repo:<name>`. The webhook adds `repo:<name>` for the PR's repo.
+- Labels: one comma-joined column (`bug,ui`), lowercase, max 10, each `[a-z0-9][\w.:/-]` up to 60 chars. Save replaces the list. Filter with `instr`, no index (personal scale). Usual set: `bug`, `feature`, `improvement`, `chore`. The project owns the repos, so tickets have no repo label.
 - `parent` gives sub-tickets. `deps` gives blocked-by. The software shows both but does not apply rules to them.
 - Search: `LIKE` on title + body. Fast enough at personal scale. No FTS5.
 - Edits: last write wins (v1).
@@ -76,7 +76,7 @@ Rules: tool descriptions under 30 words. Lists never include body. Default limit
 Server `instructions` (sent once when the agent connects, about 900 bytes). Full text in `src/mcp.ts`. They cover:
 
 - Find the project with `project repo=<git repo name>`. Read its goal and context before work. Keep tickets aligned with it. If no project owns the repo, ask the user.
-- Ticket writing standard (below). Labels: one type + `repo:<name>`.
+- Ticket writing standard (below). Labels: one type.
 - Work flow: get, check against main, branch, status doing, notes.
 - Before a PR: run Verify, tick each Done when item. Then save `pr`.
 
@@ -97,7 +97,7 @@ Bun script, linked with `bun link`. Run `cradle --help` for usage.
 ```
 cradle ls [-p ABC] [-s todo,doing] [-a name] [-l label] [-q text] [--parent ID] [--all]
 cradle show ID [-n]
-cradle new "Title" [-p ABC] [-s status] [-a name] [-l bug,repo:x] [-b body | -f file|- | -e] [--parent ID] [--blocked-by ID,ID]
+cradle new "Title" [-p ABC] [-s status] [-a name] [-l bug] [-b body | -f file|- | -e] [--parent ID] [--blocked-by ID,ID]
 cradle edit ID [-t title] [-s status] [-a name] [-l labels] [--pr url] [--parent ID] [--blocked-by ID,ID] [-b body | -f file|-]
 cradle edit ID -e             # $EDITOR, saves changed fields only
 cradle mv ID [ID...] STATUS
@@ -127,7 +127,7 @@ cradle login [URL] [TOKEN]    # checks and writes ~/.config/cradle/config.json (
 
 - Secret: `sha256("cradle-gh:" + TOKEN)` (`src/secret.ts`). The Worker and CLI derive it, so there is no second secret. If you change `TOKEN`, run `cradle gh hook` again for each repo.
 - Ticket ID comes from the head branch (`web-1-x` or `user/web-1-x`). If the branch does not match, it comes from the PR title (`WEB-1: ...`).
-- `opened` / `reopened`: set `pr`. If status is `backlog` or `todo`, set `doing`. Add label `repo:<repo name>` (also on merge).
+- `opened` / `reopened`: set `pr`. If status is `backlog` or `todo`, set `doing`.
 - `closed` + merged: status `done`, note `merged <url>`.
 - Everything else (closed without merge, other events, unknown ticket, no ID): 200 + reason text. The text shows in GitHub's delivery log.
 - `cradle gh hook [owner/repo]` creates the hook with `gh api`, or updates it if it exists. Without an argument it uses the current repo.

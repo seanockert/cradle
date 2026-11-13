@@ -84,12 +84,12 @@ In each repo (needs `gh` logged in):
 cradle gh hook            # or: cradle gh hook owner/repo
 ```
 
-PR from branch `web-1-...` opened: ticket moves to `doing`, gets the PR link and the label `repo:<name>`. Merged: `done`.
+PR from branch `web-1-...` opened: ticket moves to `doing`, gets the PR link. Merged: `done`.
 
 ### Labels
 
 ```sh
-cradle new "Crash on login" -l bug,repo:shop
+cradle new "Crash on login" -l bug
 cradle ls -l bug
 cradle edit WEB-1 -l feature   # replaces the list; -l '' clears
 ```
