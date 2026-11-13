@@ -40,7 +40,7 @@ const CSS = `:root{--fg:#1c1c1c;--muted:#6e6e6e;--line:#e8e8e8;--soft:#f4f4f3;--
 @media(prefers-color-scheme:dark){:root{--fg:#e4e4e4;--muted:#949494;--line:#2c2c2c;--soft:#222;--bg:#141414;--link:#6aa8ff;--backlog:#a78bfa;--todo:#fbbf24;--doing:#60a5fa;--done:#4ade80}}
 *{box-sizing:border-box}
 html{font-size:clamp(100%,95% + .25vw,112.5%);-webkit-text-size-adjust:100%;text-size-adjust:100%}
-body{font:1rem/1.6 system-ui,sans-serif;max-width:calc(65ch + 2.5rem);margin:0 auto;padding:1.5rem 1.25rem 4rem;color:var(--fg);background:var(--bg)}
+body{font:1rem/1.6 system-ui,sans-serif;max-width:calc(80ch + 2.5rem);margin:0 auto;padding:1.5rem 1.25rem 4rem;color:var(--fg);background:var(--bg)}
 [class^=inline],[class*=' inline'],[class^=stack],[class*=' stack']{--gap:.75rem;display:flex;gap:var(--gap)}
 [class^=inline],[class*=' inline']{align-items:center;flex-wrap:wrap}
 [class^=stack],[class*=' stack']{flex-direction:column}
@@ -64,7 +64,7 @@ h3{font-size:1rem;margin:1.5rem 0 .4rem}
 .group .rows li{grid-template-columns:auto 1fr;grid-template-areas:'id tags' 'title title'}.group .rows .pill{display:none}}
 .meta{display:grid;grid-template-columns:max-content 1fr;gap:.3rem 1.5rem;margin:0}.meta dt{color:var(--muted)}.meta dd{margin:0}
 .body{border-top:1px solid var(--line)}.body>:first-child{margin-top:1.5rem}
-.body p,.body li,.ctx,.rows .title{text-wrap:pretty}
+.body p,.body li,.ctx,.rows .title{text-wrap:pretty}.body p,.body li{max-width:65ch}
 li:has(>input[type=checkbox]){list-style:none;position:relative}
 li>input[type=checkbox]{appearance:none;position:absolute;left:-1.5rem;top:calc((1.6em - .875rem)/2);width:.875rem;height:.875rem;margin:0;border:1.5px solid var(--muted);border-radius:3px}
 li>input[type=checkbox]:checked{border-color:var(--done);background:var(--done) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='white' stroke-width='2.5'/%3E%3C/svg%3E") center/100% no-repeat}
