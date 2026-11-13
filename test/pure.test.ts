@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { slugify } from '../src/core'
-import { TEMPLATE, arr, exportMd, exportName, line, missing, parseMd, projectMd, promptMd, repoName, str, summary, ticketMd, toStatus } from '../src/format'
+import { TEMPLATE, arr, exportMd, exportName, line, missing, parseMd, parseNotes, projectMd, promptMd, repoName, str, summary, ticketMd, toStatus } from '../src/format'
 import { ticketId } from '../src/github'
 
 test('ticketId: branch, Linear-style branch, title fallback', () => {
@@ -89,6 +89,17 @@ test('exportMd -> parseMd keeps notes out of the body', () => {
   expect(notes).toBe('- 2026-11-07 01:00 one\n- 2026-11-07 02:00 two\n  lines')
   expect(parseMd(exportMd({ ...t, notes: [] })).notes).toBeUndefined()
   expect(parseMd('# T\n\n## Notes\n\nx\n\n## After').body).toBe('## Notes\n\nx\n\n## After')
+})
+
+test('parseNotes: one note per item, time from the line, multi-line text', () => {
+  const t = { id: 'ABC-1', title: 'T', status: 'todo', notes: [{ ts: '2026-11-07 01:00:00', text: 'one' }, { ts: '2026-11-07 02:00:00', text: 'two\n\n  indented\nend' }] }
+  expect(parseNotes(parseMd(exportMd(t)).notes)).toEqual([
+    { ts: '2026-11-07 01:00', text: 'one' },
+    { ts: '2026-11-07 02:00', text: 'two\n\n  indented\nend' },
+  ])
+  expect(parseNotes('- no time\n- 2026-11-07 03:00 timed')).toEqual([{ text: 'no time' }, { ts: '2026-11-07 03:00', text: 'timed' }])
+  expect(parseNotes('loose text\n- 2026-11-07 03:00 timed')).toEqual([{ text: 'loose text' }, { ts: '2026-11-07 03:00', text: 'timed' }])
+  expect(parseNotes(undefined)).toEqual([])
 })
 
 test('parseMd reads Backlog.md files', () => {

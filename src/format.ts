@@ -208,3 +208,17 @@ export function parseMd(src: string) {
   if (n) rest = rest.slice(0, n.index)
   return { fm, title, body: rest.trim(), notes }
 }
+
+// Reads the notesMd list back: one note per `- <time> <text>` item, continuation lines indented 2 spaces.
+// An item with no time gets no ts, so the server uses the current time.
+export function parseNotes(src?: string) {
+  const notes: { ts?: string; text: string }[] = []
+  for (const l of src?.split(/\r?\n/) ?? []) {
+    const item = l.match(/^- (?:(\d{4}-\d{2}-\d{2} \d{2}:\d{2})(?::\d{2})? )?(.*)$/)
+    const last = notes.at(-1)
+    if (item) notes.push(item[1] ? { ts: item[1], text: item[2] } : { text: item[2] })
+    else if (last) last.text += `\n${l.startsWith('  ') ? l.slice(2) : l}`
+    else if (l.trim()) notes.push({ text: l })
+  }
+  return notes.map((x) => ({ ...x, text: x.text.trimEnd() })).filter((x) => x.text)
+}

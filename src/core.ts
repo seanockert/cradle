@@ -82,6 +82,10 @@ const CreateInput = z.object({
   blocked_by: z.array(Id).default([]),
   labels: Labels.default([]),
   note: z.string().min(1).optional(),
+  // Notes with their own times, for import. REST only, not in the MCP schema.
+  notes: z
+    .array(z.object({ ts: z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/).optional(), text: z.string().min(1) }))
+    .default([]),
 })
 
 // undefined = no change, null = clear
@@ -256,6 +260,7 @@ async function createTicket(db: D1Database, input: unknown) {
         t.parent ?? null, t.pr ?? null, t.body, joinList(t.labels), t.project,
       ),
     ...t.blocked_by.map((b) => depStmt(db, NEW, t.project, b)),
+    ...t.notes.map((n) => noteStmt(db, NEW, t.project, n.text, n.ts)),
     ...(t.note ? [noteStmt(db, NEW, t.project, t.note)] : []),
   ])
   const id = ins.results[0]?.id
@@ -334,8 +339,11 @@ const OLD = `SELECT id, ? FROM tickets WHERE id = ?`
 const depStmt = (db: D1Database, from: string, ref: string, b: string) =>
   db.prepare(`INSERT OR IGNORE INTO deps (ticket, blocked_by) ${from}`).bind(b, ref)
 
-const noteStmt = (db: D1Database, from: string, ref: string, text: string) =>
-  db.prepare(`INSERT INTO notes (ticket, text) ${from}`).bind(text, ref)
+// ts: YYYY-MM-DD HH:MM[:SS]. Default now.
+const noteStmt = (db: D1Database, from: string, ref: string, text: string, ts?: string) =>
+  db
+    .prepare(`INSERT INTO notes (ticket, text, ts) SELECT *, COALESCE(datetime(?), datetime('now')) FROM (${from})`)
+    .bind(ts ?? null, text, ref)
 
 // Each `old` must match exactly once
 function applyEdits(body: string, edits: { old: string; new: string }[]) {

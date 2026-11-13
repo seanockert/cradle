@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, basename } from 'node:path'
-import { EDITABLE, TEMPLATE, arr, exportMd, exportName, lines, missing, parseMd, projectLines, projectMd, repoName, str, ticketMd, toStatus } from './format'
+import { EDITABLE, TEMPLATE, arr, exportMd, exportName, lines, missing, parseMd, parseNotes, projectLines, projectMd, repoName, str, ticketMd, toStatus } from './format'
 import { mcpKey, webhookSecret } from './secret'
 
 const HELP = `cradle - tickets for agents
@@ -250,7 +250,7 @@ const cmds: Record<string, () => Promise<void>> = {
     const t = title ?? (file === '-' ? die('no title. add a # heading') : basename(file).replace(/\.md$/i, ''))
 
     if (!o.split) {
-      const r = await api('POST', '/tickets', { ...base, title: t, body, note: notes })
+      const r = await api('POST', '/tickets', { ...base, title: t, body, notes: parseNotes(notes) })
       return out(r, () => r.ids[0])
     }
 
@@ -259,7 +259,7 @@ const cmds: Record<string, () => Promise<void>> = {
     if (!sections.length) die('no ## sections to split')
     const {
       ids: [pid],
-    } = await api('POST', '/tickets', { ...base, title: t, body: intro.trim(), note: notes })
+    } = await api('POST', '/tickets', { ...base, title: t, body: intro.trim(), notes: parseNotes(notes) })
     const kids = sections.map((s) => {
       const [head, ...rest] = s.split('\n')
       return {

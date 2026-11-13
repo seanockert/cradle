@@ -117,7 +117,7 @@ cradle login [URL] [TOKEN]    # checks and writes ~/.config/cradle/config.json (
 ```
 
 - Default project for `new` and `import`: `-p`, then `CRADLE_PROJECT`, then the project that owns the current git repo (origin remote name, else the repo folder name).
-- Import: frontmatter `title`, else H1, else the file name. `--split` makes each `##` section a sub-ticket under one parent. Reads cradle and Backlog.md keys (`dependencies`, `parent_task_id`, `To Do`/`In Progress` statuses). If the file `id` is from another project, links to other tickets are dropped with a warning.
+- Import: frontmatter `title`, else H1, else the file name. `--split` makes each `##` section a sub-ticket under one parent. Reads cradle and Backlog.md keys (`dependencies`, `parent_task_id`, `To Do`/`In Progress` statuses). If the file `id` is from another project, links to other tickets are dropped with a warning. `## Notes` items (`- <time> <text>`) become one note each with their own time. REST create takes them as `notes: [{ts, text}]`; the MCP schema does not.
 - Export: Backlog.md task format. YAML frontmatter (`id, title, status, assignee[], labels[], created_date, updated_date, dependencies, parent_task_id`, plus `branch`, `pr`), then the body, then `## Notes`. File name `abc-1 - Title.md`. The web view serves the same file at `/t/ABC-1.md`.
 - Dropped for simplicity: `search` (use `ls -q`), `board`.
 
