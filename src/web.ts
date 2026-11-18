@@ -1,10 +1,10 @@
-// Read-only HTML view: /t (open tickets), /t/p/:key (project), /t/:id, /t/:id.md (export), /t/connect (setup for agents and CLI). Token login, cookie session.
+// Read-only HTML view: /t (open tickets), /t/p/:key (project), /t/insights, /t/:id, /t/:id.md (export), /t/connect (setup for agents and CLI). Token login, cookie session.
 import { Hono, type MiddlewareHandler } from 'hono'
 import { html, raw } from 'hono/html'
 import { getCookie, setCookie } from 'hono/cookie'
 import { Marked } from 'marked'
 import * as core from './core'
-import { exportMd, exportName, promptMd, summary } from './format'
+import { exportMd, exportName, idleDays, insightsMd, promptMd, summary } from './format'
 import { derive, mcpKey, same } from './secret'
 import LOGO from './logo.svg'
 
@@ -51,7 +51,7 @@ nav{padding-bottom:1rem;border-bottom:1px solid var(--line)}nav .brand{--gap:.4r
 h1{font-size:1.6rem;line-height:1.25;margin:0;text-wrap:balance}
 h2{font-size:1.05rem;margin:2rem 0 .5rem}h2 a{color:inherit}
 h3{font-size:1rem;margin:1.5rem 0 .4rem}
-.muted,.l{color:var(--muted)}.l{font-size:.875rem}.ctx{color:var(--muted);margin:0 0 .5rem}
+.muted,.l{color:var(--muted)}.idle{color:var(--todo)}.l{font-size:.875rem}.ctx{color:var(--muted);margin:0 0 .5rem}
 .id{font-family:ui-monospace,monospace;font-size:.875rem;color:var(--muted)}
 .pill{display:inline-block;min-width:4.5rem;text-align:center;font-size:.875rem;padding:.05rem .5rem;border-radius:99px;color:var(--muted);background:color-mix(in srgb,currentColor 12%,transparent)}
 .st-todo{color:var(--todo)}.st-backlog{color:var(--backlog);background:none;box-shadow:inset 0 0 0 1px color-mix(in srgb,currentColor 35%,transparent)}.st-doing{color:var(--doing)}.st-done{color:var(--done)}.st-cancelled{color:var(--muted);text-decoration:line-through}
@@ -115,12 +115,12 @@ const labelLinks = (labels?: string[]) => labels?.map((l) => html` <a class="l" 
 const closed = (status: string) => status === 'done' || status === 'cancelled'
 
 // Row: pill, id, title, labels. Narrow screens put the title below. Groups hide the pill.
-const item = (t: Row) =>
-  html`<li${closed(t.status) ? html` class="closed"` : ''}><div class="pill st-${t.status}">${t.status}</div><div class="id">${t.id}</div><div class="title"><a class="t" href="/t/${t.id}">${t.title}</a></div><div class="tags">${labelLinks(t.labels)}${
+const item = (t: Row, idle = idleDays(t)) =>
+  html`<li${closed(t.status) ? html` class="closed"` : ''}><div class="pill st-${t.status}">${t.status}</div><div class="id">${t.id}</div><div class="title"><a class="t" href="/t/${t.id}">${t.title}</a></div><div class="tags">${idle ? html`<small class="idle">idle ${idle}d</small> ` : ''}${labelLinks(t.labels)}${
     t.assignee ? html` <small class="muted">@${t.assignee}</small>` : ''
   }</div></li>`
 
-const list = (rows: Row[]) => html`<ul class="rows">${rows.map(item)}</ul>`
+const list = (rows: Row[]) => html`<ul class="rows">${rows.map((t) => item(t))}</ul>`
 
 // One group per status, in work order. Closed groups start collapsed.
 const GROUP_ORDER = ['doing', 'todo', 'backlog', 'done', 'cancelled']
@@ -185,7 +185,7 @@ web.get('/', async (c) => {
   return c.html(
     page(
       'cradle',
-      html`${nav(label ? html`<span class="muted">#${label}</span><a href="/t">all labels</a>` : '')}${
+      html`${nav(html`${label ? html`<span class="muted">#${label}</span><a href="/t">all labels</a>` : ''}<a href="/t/insights">insights</a>`)}${
         tickets.length ? groups : html`<p>No tickets.</p>`
       }`,
     ),
@@ -213,6 +213,11 @@ ${copyBlock(config)}</section>
 ${copyBlock(`bun install -g github:seanockert/cradle\ncradle login ${origin}`)}</section>`,
     ),
   )
+})
+
+web.get('/insights', async (c) => {
+  const r = await core.insights(c.env.DB, Number(c.req.query('days')) || undefined)
+  return c.html(page('cradle insights', html`${nav()}<div class="body">${raw(await md.parse(insightsMd(r)))}</div>`))
 })
 
 web.get('/p/:key', async (c) => {

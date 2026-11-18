@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { slugify } from '../src/core'
-import { TEMPLATE, arr, exportMd, exportName, line, missing, parseMd, parseNotes, projectMd, promptMd, repoName, str, summary, ticketMd, toStatus } from '../src/format'
+import { TEMPLATE, allTicked, arr, exportMd, exportName, line, missing, parseMd, parseNotes, projectMd, promptMd, repoName, str, summary, ticketMd, toStatus } from '../src/format'
 import { ticketId } from '../src/github'
 
 test('ticketId: branch, Linear-style branch, title fallback', () => {
@@ -142,4 +142,12 @@ test('repoName from name, owner/name and git URLs', () => {
   expect(repoName('seanockert/cradle')).toBe('cradle')
   expect(repoName('https://github.com/seanockert/cradle.git')).toBe('cradle')
   expect(repoName('git@github.com:seanockert/cradle.git')).toBe('cradle')
+})
+
+test('allTicked: only Done when boxes count, all ticked', () => {
+  const body = (items: string) => `## Done when\n${items}\n## Verify\n- [ ] not counted\n`
+  expect(allTicked(body('- [x] a\n- [X] b'))).toBe(true)
+  expect(allTicked(body('- [x] a\n- [ ] b'))).toBe(false)
+  expect(allTicked(body('No boxes.'))).toBe(false)
+  expect(allTicked('## Done when\n- [x] last section')).toBe(true)
 })

@@ -4,6 +4,7 @@ type Row = Record<string, any>
 
 // ABC-3 [todo] Stripe webhook #bug @sean parent:ABC-2 blocked_by:ABC-1
 export function line(t: Row) {
+  const idle = idleDays(t)
   return [
     t.id,
     `[${t.status}]`,
@@ -12,9 +13,16 @@ export function line(t: Row) {
     t.assignee && `@${t.assignee}`,
     t.parent && `parent:${t.parent}`,
     t.blocked_by?.length && `blocked_by:${t.blocked_by.join(',')}`,
+    idle && `idle:${idle}d`,
   ]
     .filter(Boolean)
     .join(' ')
+}
+
+// Whole days with no update, doing tickets only
+export function idleDays(t: Row, now = Date.now()) {
+  if (t.status !== 'doing' || !t.updated) return 0
+  return Math.max(0, Math.floor((now - Date.parse(`${t.updated.replace(' ', 'T')}Z`)) / 864e5))
 }
 
 export const lines = (rows: Row[]) => (rows.length ? rows.map(line).join('\n') : 'no tickets')
@@ -63,6 +71,12 @@ Why this matters. Link it to the project goal.
 - A command or step that proves each item
 `
 export const missing = (body = '') => SECTIONS.filter((h) => !new RegExp(`^## ${h}\\b`, 'im').test(body))
+
+export function allTicked(body = '') {
+  const sec = body.match(/^## Done when\b[^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/im)?.[1] ?? ''
+  const boxes = sec.match(/^\s*[-*] \[[ xX]\]/gm) ?? []
+  return boxes.length > 0 && boxes.every((b) => /\[[xX]\]/.test(b))
+}
 
 const minute = (ts: string) => ts.slice(0, 16)
 
@@ -221,4 +235,37 @@ export function parseNotes(src?: string) {
     else if (l.trim()) notes.push({ text: l })
   }
   return notes.map((x) => ({ ...x, text: x.text.trimEnd() })).filter((x) => x.text)
+}
+
+export function insightsMd(r: Row) {
+  const list = (rows: Row[], f: (x: Row) => string) => (rows.length ? rows.map((x) => `- ${f(x)}`).join('\n') : 'None.')
+  const at = (e: Row) => `${minute(e.ts)}${e.ticket ? ` ${e.ticket}` : ''}`
+  const oneLine = (s: string) => s.replace(/\s+/g, ' ')
+  const closed = Object.entries(r.closedBy).map(([k, n]) => `${n} by ${k}`).join(', ') || 'None'
+  return `# Insights, last ${r.days} days
+
+## Feedback from agents
+
+${list(r.feedback, (f) => `${at(f)}: ${oneLine(f.detail)}`)}
+
+## Idle in doing
+
+${list(r.idle, (t) => `${t.id} ${idleDays(t)}d: ${t.title}`)}
+
+## Closed to done
+
+${closed}. save: set by an agent or person. merge: the webhook.
+
+## Reopened
+
+${list(r.reopened, (e) => `${at(e)} ${e.detail} (${e.tool})`)}
+
+## Errors and warnings
+
+${list(r.problems, (e) => `${at(e)} ${e.tool}: ${oneLine(e.detail)}`)}
+
+## Calls
+
+${list(r.calls, (c) => `${c.tool}: ${c.n}${c.errors ? `, ${c.errors} failed` : ''}`)}
+`
 }
