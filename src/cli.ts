@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, basename } from 'node:path'
-import { EDITABLE, TEMPLATE, arr, exportMd, exportName, lines, missing, parseMd, parseNotes, projectLines, projectMd, repoName, str, ticketMd, toStatus } from './format'
+import { EDITABLE, TEMPLATE, arr, exportMd, exportName, insightsMd, lines, missing, parseMd, parseNotes, projectLines, projectMd, repoName, str, ticketMd, toStatus } from './format'
 import { mcpKey, webhookSecret } from './secret'
 
 const HELP = `cradle - tickets for agents
@@ -24,6 +24,8 @@ const HELP = `cradle - tickets for agents
   cradle project KEY|.                 goal, context, repos, ticket counts. . = this git repo's project
   cradle project new KEY "Name" [-r repo,repo] [-b context | -f file|-]
   cradle project edit KEY [-t name] [-r repo,repo] [-b context | -f file|-] [-e]
+  cradle insights [-d days]            feedback, idle tickets, errors. Default 14 days
+  cradle feedback "text" [ID]          tell the maintainer what got in your way
   cradle login [URL] [TOKEN]           asks for what is missing, checks it, saves it
   cradle mcp [add]                     print MCP URL + config. add: set up Claude Code
   cradle gh hook [owner/repo]          add webhook: PR opened -> doing, merged -> done
@@ -50,6 +52,7 @@ const parsed = (() => {
         file: { type: 'string', short: 'f' },
         out: { type: 'string', short: 'o' },
         q: { type: 'string', short: 'q' },
+        days: { type: 'string', short: 'd' },
         parent: { type: 'string' },
         'blocked-by': { type: 'string' },
         pr: { type: 'string' },
@@ -208,6 +211,16 @@ const cmds: Record<string, () => Promise<void>> = {
     const text = need(args.slice(2).join(' ') || undefined, 'cradle note ID "text"')
     const r = await api('PATCH', `/tickets/${id}`, { note: text })
     out(r, () => 'ok')
+  },
+
+  async insights() {
+    const r = await api('GET', `/insights${o.days ? `?days=${Number(o.days)}` : ''}`)
+    out(r, () => insightsMd(r).trimEnd())
+  },
+
+  async feedback() {
+    const text = need(args[1], 'cradle feedback "text" [ID]')
+    out(await api('POST', '/feedback', { text, id: args[2] }), () => 'thanks')
   },
 
   async branch() {

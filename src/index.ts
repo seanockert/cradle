@@ -1,4 +1,4 @@
-import { Hono, type MiddlewareHandler } from 'hono'
+import { Hono, type Context, type MiddlewareHandler } from 'hono'
 import { bearerAuth } from 'hono/bearer-auth'
 import { HTTPException } from 'hono/http-exception'
 import * as core from './core'
@@ -65,6 +65,15 @@ api.patch('/tickets/:id', async (c) => {
   return c.json({ ids: await core.saveTickets(c.env.DB, [{ ...body, id: c.req.param('id') }]) })
 })
 
+api.get('/insights', async (c) => c.json(await core.insights(c.env.DB, Number(c.req.query('days')) || undefined)))
+
+api.post('/feedback', async (c) => {
+  const { text, id } = await c.req.json<{ text?: string; id?: string }>()
+  if (!text?.trim()) return c.json({ error: 'text is required' }, 400)
+  await core.logEvent(c.env.DB, { source: 'api', tool: 'feedback', ticket: id, detail: text.trim() })
+  return c.json({ ok: true })
+})
+
 app.route('/api', api)
 
 // MCP auth: key in URL (/mcp/<key>) or bearer header (/mcp).
@@ -80,7 +89,7 @@ const mcpAuth: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
   return c.json({ jsonrpc: '2.0', id: null, error: { code: -32001, message } }, 403)
 }
 
-const mcp = (c: { req: { raw: Request }; env: Env }) => handleMcp(c.req.raw, c.env.DB)
+const mcp = (c: Context<{ Bindings: Env }>) => handleMcp(c.req.raw, c.env.DB, (p) => c.executionCtx.waitUntil(p))
 app.all('/mcp', mcpAuth, mcp)
 app.all('/mcp/:key', mcpAuth, mcp)
 
@@ -98,5 +107,6 @@ export default {
   async scheduled(_ctrl, env) {
     const ids = await core.purgeCancelled(env.DB)
     if (ids.length) console.log(`purged cancelled: ${ids.join(', ')}`)
+    await core.purgeEvents(env.DB)
   },
 } satisfies ExportedHandler<Env>

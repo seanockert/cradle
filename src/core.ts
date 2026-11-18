@@ -1,6 +1,6 @@
 // Ticket operations. REST, MCP and webhook all call these.
 import { z } from 'zod'
-import { STATUSES, repoName } from './format'
+import { STATUSES, allTicked, repoName } from './format'
 
 export { STATUSES }
 const CLOSED = `('done', 'cancelled')`
@@ -196,7 +196,7 @@ export async function listTickets(db: D1Database, input: ListOpts) {
   // blocked_by lists only open blockers. Open tickets sort first, so a limit cuts closed ones.
   const { results } = await db
     .prepare(
-      `SELECT t.id, t.status, t.title, t.labels, t.assignee, t.parent,
+      `SELECT t.id, t.status, t.title, t.labels, t.assignee, t.parent, t.updated,
         (SELECT group_concat(d.blocked_by) FROM deps d JOIN tickets b ON b.id = d.blocked_by
           WHERE d.ticket = t.id AND b.status NOT IN ${CLOSED}) AS blocked_by
       FROM tickets t ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
@@ -289,31 +289,35 @@ async function updateTicket(db: D1Database, input: unknown) {
     if (v !== undefined) sets.push(`${k} = ?`), args.push(v)
   }
 
-  const stmts = [db.prepare(`UPDATE tickets SET ${sets.join(', ')} WHERE id = ? RETURNING id`).bind(...args, u.id)]
+  const update = db.prepare(`UPDATE tickets SET ${sets.join(', ')} WHERE id = ? RETURNING id`).bind(...args, u.id)
+  // Status log goes first, to read the old status
+  const stmts = [...(u.status ? [statusStmt(db, '?', 'save').bind(u.status, u.id)] : []), update]
   if (u.blocked_by) {
     stmts.push(db.prepare('DELETE FROM deps WHERE ticket = ?').bind(u.id))
     stmts.push(...u.blocked_by.map((b) => depStmt(db, OLD, u.id, b)))
   }
   if (u.note) stmts.push(noteStmt(db, OLD, u.id, u.note))
 
-  const [upd] = await db.batch(stmts)
-  if (!upd.results.length) throw new HttpError(404, `${u.id} not found`)
+  const res = await db.batch(stmts)
+  if (!res[stmts.indexOf(update)].results.length) throw new HttpError(404, `${u.id} not found`)
   return u.id
 }
 
 // From the GitHub webhook. Opened: link + move to doing. Merged: done.
 export async function linkPr(db: D1Database, id: string, url: string, merged: boolean) {
+  const next = `CASE WHEN ? THEN 'done' WHEN status IN ('backlog', 'todo') THEN 'doing' ELSE status END`
   const stmts = [
+    statusStmt(db, next, merged ? 'merge' : 'pr').bind(merged ? 1 : 0, id),
     db
       .prepare(
         `UPDATE tickets SET pr = ?, updated = datetime('now'),
-          status = CASE WHEN ? THEN 'done' WHEN status IN ('backlog', 'todo') THEN 'doing' ELSE status END
+          status = ${next}
         WHERE id = ? RETURNING status`,
       )
       .bind(url, merged ? 1 : 0, id),
   ]
   if (merged) stmts.push(noteStmt(db, OLD, id, `merged ${url}`))
-  const [upd] = await db.batch<{ status: string }>(stmts)
+  const [, upd] = await db.batch<{ status: string }>(stmts)
   const status = upd.results[0]?.status
   return status ? `${id} ${status}` : `${id} not found, ignored`
 }
@@ -330,6 +334,57 @@ export async function purgeCancelled(db: D1Database, days = 30) {
   ])
   return res[3].results.map((r) => r.id)
 }
+
+// `next`: SQL for the new status. Bind its args, then the id. No row if unchanged.
+const statusStmt = (db: D1Database, next: string, by: 'save' | 'pr' | 'merge') =>
+  db.prepare(
+    `INSERT INTO events (source, tool, ticket, detail)
+    SELECT 'status', '${by}', id, status || '>' || new FROM (SELECT id, status, ${next} AS new FROM tickets WHERE id = ?)
+    WHERE status != new`,
+  )
+
+export async function readyToClose(db: D1Database, ids: string[]) {
+  if (!ids.length) return []
+  const { results } = await db
+    .prepare(`SELECT id, body FROM tickets WHERE status = 'doing' AND id IN (${ids.map(() => '?').join(', ')})`)
+    .bind(...ids)
+    .all<{ id: string; body: string }>()
+  return results.filter((r) => allTicked(r.body)).map((r) => r.id)
+}
+
+export type Event = { source: string; tool: string; ticket?: string; ok?: boolean; detail?: string }
+
+export const logEvent = (db: D1Database, e: Event) =>
+  db
+    .prepare('INSERT INTO events (source, tool, ticket, ok, detail) VALUES (?, ?, ?, ?, ?)')
+    .bind(e.source, e.tool, e.ticket || null, e.ok === false ? 0 : 1, e.detail?.slice(0, 500) || null)
+    .run()
+
+export async function insights(db: D1Database, days = 14) {
+  const SINCE = `ts > datetime('now', ?)`
+  const recent = (sql: string) => db.prepare(sql).bind(`-${days} days`)
+  const [calls, problems, feedback, closed, reopened, idle] = await db.batch<Record<string, any>>([
+    recent(`SELECT tool, count(*) AS n, sum(ok = 0) AS errors FROM events WHERE source = 'mcp' AND ${SINCE} GROUP BY tool ORDER BY n DESC`),
+    recent(`SELECT ts, tool, ticket, detail FROM events WHERE source = 'mcp' AND tool != 'feedback' AND detail IS NOT NULL AND ${SINCE} ORDER BY id DESC LIMIT 50`),
+    recent(`SELECT ts, ticket, detail FROM events WHERE tool = 'feedback' AND ${SINCE} ORDER BY id DESC LIMIT 50`),
+    recent(`SELECT tool, count(*) AS n FROM events WHERE source = 'status' AND detail LIKE '%>done' AND ${SINCE} GROUP BY tool`),
+    recent(`SELECT ts, tool, ticket, detail FROM events WHERE source = 'status' AND detail LIKE 'done>%' AND ${SINCE} ORDER BY id DESC LIMIT 50`),
+    db.prepare(`SELECT id, status, title, updated FROM tickets WHERE status = 'doing' AND updated < datetime('now', '-1 day') ORDER BY updated`),
+  ])
+  return {
+    days,
+    feedback: feedback.results,
+    idle: idle.results,
+    closedBy: Object.fromEntries(closed.results.map((r) => [r.tool, r.n])),
+    reopened: reopened.results,
+    problems: problems.results,
+    calls: calls.results,
+  }
+}
+
+// Status rows stay: they are the ticket history
+export const purgeEvents = (db: D1Database, days = 30) =>
+  db.prepare(`DELETE FROM events WHERE source != 'status' AND ts < datetime('now', ?)`).bind(`-${days} days`).run()
 
 // Ticket id as a SELECT: inserts join the batch and do nothing if the ticket is missing.
 // NEW is the id that create's seq bump just made; bind the project key. OLD: bind the id.

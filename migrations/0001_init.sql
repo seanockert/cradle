@@ -39,3 +39,15 @@ CREATE TABLE notes (
   text TEXT NOT NULL
 );
 CREATE INDEX notes_ticket ON notes(ticket);
+
+-- Usage log. source mcp|api: tool call (detail = error, warning or feedback). source status: tool = who, detail = 'old>new'.
+CREATE TABLE events (
+  id INTEGER PRIMARY KEY,
+  ts TEXT NOT NULL DEFAULT (datetime('now')),
+  source TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  ticket TEXT,
+  ok INTEGER NOT NULL DEFAULT 1,
+  detail TEXT
+);
+CREATE INDEX events_ts ON events(ts);

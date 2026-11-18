@@ -13,7 +13,8 @@ Write each ticket so another agent can do and verify the work with no other cont
 - Short sentences, one instruction each, no filler (ASD-STE100 style).
 - One type label: bug, feature, improvement or chore.
 To work on a ticket: get it, check it against the latest main, fix stale facts (save with edits), check out its branch (create it if missing), save status doing. Use note for progress and decisions.
-Before you open a PR: run Verify and tick each Done when item (save with edits). If an item fails, fix it or add a note. Do not skip it. After opening a PR, save pr=<url>. Merging the PR sets status done if the repo has the cradle webhook; else set it yourself.
+Before you open a PR: run Verify and tick each Done when item (save with edits). If an item fails, fix it or add a note. Do not skip it. After opening a PR, save pr=<url>. Merging the PR sets status done if the repo has the cradle webhook. With no PR (work on main or deployed), save status done yourself. Before you end a turn, close your finished doing tickets.
+If cradle gets in your way (unclear rule, missing feature, error you work around), send feedback.
 Use edits, not a full body, to change part of a body.
 Ticket page for PR bodies: ${origin}/t/<id>`
 
@@ -43,19 +44,28 @@ const SaveItem = z.object({
 })
 
 type Text = { content: { type: 'text'; text: string }[]; isError?: boolean }
+type Out = string | { text: string; ticket?: string; detail?: string }
+type Log = (e: core.Event) => void
 
-// Run a tool, return text. Errors go back to the agent as text so it can fix the call.
+const ticketOf = (a: any) => a?.id ?? a?.key ?? a?.items?.map((i: any) => i.id).filter(Boolean).join(' ')
+
+// Errors go back to the agent as text so it can fix the call
 const run =
-  <A>(fn: (args: A) => Promise<string>) =>
+  <A>(log: Log, tool: string, fn: (args: A) => Promise<Out>) =>
   async (args: A): Promise<Text> => {
     try {
-      return { content: [{ type: 'text', text: await fn(args) }] }
+      const r = await fn(args)
+      const { text, ticket = ticketOf(args), detail } = typeof r === 'string' ? { text: r } : r
+      log({ source: 'mcp', tool, ticket, detail })
+      return { content: [{ type: 'text', text }] }
     } catch (e) {
-      return { content: [{ type: 'text', text: core.errorInfo(e).error }], isError: true }
+      const error = core.errorInfo(e).error
+      log({ source: 'mcp', tool, ticket: ticketOf(args), ok: false, detail: error })
+      return { content: [{ type: 'text', text: error }], isError: true }
     }
   }
 
-function server(db: D1Database, origin: string) {
+function server(db: D1Database, origin: string, log: Log) {
   const s = new McpServer({ name: 'cradle', version: '1.0.0' }, { instructions: instructions(origin) })
 
   s.registerTool(
@@ -74,7 +84,7 @@ function server(db: D1Database, origin: string) {
       },
       annotations: { readOnlyHint: true },
     },
-    run(async (a) => {
+    run(log, 'list', async (a) => {
       // Fetch one extra row to tell the agent when the list is cut off
       const limit = Math.min(a.limit ?? 50, 499)
       const rows = await core.listTickets(db, { ...a, limit: limit + 1 })
@@ -90,7 +100,7 @@ function server(db: D1Database, origin: string) {
       inputSchema: { id: Id, notes: z.boolean().optional() },
       annotations: { readOnlyHint: true },
     },
-    run(async (a) => ticketMd(await core.getTicket(db, a.id, a)).trimEnd()),
+    run(log, 'get', async (a) => ticketMd(await core.getTicket(db, a.id, a)).trimEnd()),
   )
 
   s.registerTool(
@@ -100,14 +110,17 @@ function server(db: D1Database, origin: string) {
         'Create or update tickets in one call. Without id: create. With id: change only given fields, null clears. Returns ids.',
       inputSchema: { items: z.array(SaveItem).min(1) },
     },
-    run(async (a) => {
+    run(log, 'save', async (a) => {
       const ids = await core.saveTickets(db, a.items)
       // Warn, do not block: new tickets should follow the body standard
       const warn = ids.flatMap((id, i) => {
         const gaps = a.items[i].id ? [] : missing(a.items[i].body)
-        return gaps.length ? [`${id} missing ${gaps.map((h) => `## ${h}`).join(', ')}`] : []
+        return gaps.length ? [`${id} missing ${gaps.map((h) => `## ${h}`).join(', ')}. Add them with edits.`] : []
       })
-      return [ids.join(' '), ...warn].join('\n') + (warn.length ? '\nAdd them with edits.' : '')
+      // Body changed: is it finished but still doing?
+      const ready = await core.readyToClose(db, ids.filter((_, i) => a.items[i].edits || a.items[i].body))
+      if (ready.length) warn.push(`${ready.join(' ')}: all Done when items ticked. If the work is on main or deployed, save status done.`)
+      return { text: [ids.join(' '), ...warn].join('\n'), ticket: ids.join(' '), detail: warn.join(' ') || undefined }
     }),
   )
 
@@ -125,7 +138,7 @@ function server(db: D1Database, origin: string) {
         edits: Edits,
       },
     },
-    run(async ({ key, repo, ...rest }) => {
+    run(log, 'project', async ({ key, repo, ...rest }) => {
       if (!key && repo) return projectMd(await core.projectForRepo(db, repo)).trimEnd()
       if (!key) return projectLines(await core.listProjects(db))
       if (Object.values(rest).every((v) => v === undefined)) return projectMd(await core.getProject(db, key)).trimEnd()
@@ -133,11 +146,21 @@ function server(db: D1Database, origin: string) {
     }),
   )
 
+  s.registerTool(
+    'feedback',
+    {
+      description: 'Tell the cradle maintainer what got in your way. One short line.',
+      inputSchema: { text: z.string().min(1), id: Id.optional() },
+    },
+    run(log, 'feedback', async (a) => ({ text: 'thanks', detail: a.text })),
+  )
+
   return s
 }
 
-export async function handleMcp(req: Request, db: D1Database) {
+export async function handleMcp(req: Request, db: D1Database, waitUntil: (p: Promise<unknown>) => void) {
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
-  await server(db, new URL(req.url).origin).connect(transport)
+  const log: Log = (e) => waitUntil(core.logEvent(db, e))
+  await server(db, new URL(req.url).origin, log).connect(transport)
   return transport.handleRequest(req)
 }

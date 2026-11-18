@@ -119,6 +119,23 @@ cradle project edit WEB -r website,website-api   # set its repos
 
 `https://<server>/t` lists tickets by project and status. Done and cancelled start collapsed. `/t/p/WEB` shows a project's context. `/t/WEB-1` shows one ticket. `/t/connect` shows how to connect agents and the CLI. Log in once with your token (30-day cookie).
 
+### Closing tickets
+
+Merge a PR with the webhook on: `done`. No PR (work on main, or deployed): the agent sets `done`. When a save leaves a `doing` ticket with all `Done when` items ticked, the reply asks the agent to close it. `doing` tickets with no update for a day or more show `idle:Nd` in `ls` and the web view.
+
+### Insights
+
+Cradle logs each MCP call (tool, ticket, error or warning; no request bodies), each status change, and agent feedback. Agents send feedback with the MCP `feedback` tool when cradle gets in their way. Call logs are deleted after 30 days. Status changes stay.
+
+```sh
+cradle insights          # last 14 days. -d 30 for more
+cradle feedback "edit failed on CRLF body" WEB-1
+```
+
+Web: `/t/insights`. API: `GET /api/insights?days=14`.
+
+Review it from time to time. Ask an agent: "Read `cradle insights`. Find patterns in the feedback, errors and idle tickets. File CRD tickets for fixes."
+
 ### Export
 
 ```sh
